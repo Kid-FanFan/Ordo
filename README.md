@@ -1,3 +1,5 @@
+<p align="center">简体中文 · <a href="README_EN.md">English</a></p>
+
 <div align="center">
   <img src="build/brand/ordo-logo-2048.png" width="96" alt="Ordo logo"/>
   <h1>Ordo</h1>

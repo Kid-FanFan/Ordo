@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 const clientRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pubRoot = path.resolve(clientRoot, "..", "ordo-public");
 const PUSH = process.argv.includes("--push");
+const msgIdx = process.argv.indexOf("--message");
+const COMMIT_MSG = msgIdx > -1 ? process.argv[msgIdx + 1] : `Ordo v${VERSION} — 企业级 AI Agent 桌面工作台（客户端）`;
 const VERSION = JSON.parse(fs.readFileSync(path.join(clientRoot, "package.json"), "utf-8")).version;
 
 const git = (args, cwd = clientRoot) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
@@ -59,20 +61,28 @@ if (hits.length) {
 }
 console.log("[sync] ✅ 密钥扫描通过（真实 key 零出现）");
 
-// 5) git 提交
+// 5) git 提交（双镜像：origin=gitee master，github=GitHub main）
+const ensureRemote = (name, url) => {
+  const remotes = git(["remote"], pubRoot).split("\n");
+  if (!remotes.includes(name)) git(["remote", "add", name, url], pubRoot);
+};
 if (!inRepo()) {
   git(["init", "-b", "master"], pubRoot);
-  git(["remote", "add", "origin", "https://gitee.com/kidzyf/ordo.git"], pubRoot);
-  console.log("[sync] 已初始化公开库仓库并关联 origin");
+  console.log("[sync] 已初始化公开库仓库");
 }
+ensureRemote("origin", "https://gitee.com/kidzyf/ordo.git");
+ensureRemote("github", "https://github.com/Kid-FanFan/Ordo.git");
 git(["add", "-A"], pubRoot);
 const staged = git(["status", "--porcelain"], pubRoot);
 if (!staged) {
   console.log(`[sync] 公开库已与私有库一致（v${VERSION}），无需提交`);
 } else if (PUSH) {
-  git(["commit", "-m", `Ordo v${VERSION} — 企业级 AI Agent 桌面工作台（客户端）`], pubRoot);
+  const msg = COMMIT_MSG;
+  git(["commit", "-m", msg], pubRoot);
   git(["push", "-u", "origin", "master"], pubRoot);
-  console.log(`[sync] ✅ 已提交并推送公开库（v${VERSION}，${files.length} 文件）`);
+  git(["push", "-u", "github", "master:main"], pubRoot);
+  console.log(`[sync] ✅ 已提交并推送双镜像（v${VERSION}，${files.length} 文件）：gitee master + GitHub main`);
+  console.log("[sync] 提醒：tag 需手动两边各推一次 → git tag v<版本> && git push origin v<版本> && git push github v<版本>");
 } else {
   console.log(`[sync] 已同步 ${files.length} 文件（含 ${deletedHint} 个删除）到 ordo-public/，未提交。确认后加 --push 推送`);
 }
