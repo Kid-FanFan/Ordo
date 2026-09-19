@@ -537,6 +537,8 @@ svg { flex: none; }
   display: flex;
   align-items: center;
   gap: 5px;
+  /* 常态文本约 19px、hover 态按钮 20px：定高避免 hover 换内容时行高抖动 */
+  min-height: 30px;
   margin: 0 -4px;
   padding: 5px 4px;
   background: var(--bg);
