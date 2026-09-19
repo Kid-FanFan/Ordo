@@ -1,0 +1,91 @@
+/* ===== markdown.css ===== */
+/* AI 正文 Markdown 元素样式 —— 对应设计文档 §4.9 */
+
+.md-text p { margin: 0 0 10px; }
+.md-text > :last-child { margin-bottom: 0; }
+.md-text h1, .md-text h2, .md-text h3, .md-text h4 {
+  margin: 18px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.md-text h1 { font-size: 19px; }
+.md-text h2 { font-size: 17px; }
+.md-text h3 { font-size: 15px; }
+.md-text h4 { font-size: 14px; }
+.md-text h1:first-child, .md-text h2:first-child, .md-text h3:first-child { margin-top: 0; }
+
+.md-text ul, .md-text ol { margin: 0 0 10px; padding-left: 22px; }
+.md-text li { margin: 3px 0; }
+.md-text li::marker { color: var(--text-faint); }
+
+.md-text code {
+  padding: 1.5px 5px;
+  border-radius: 5px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.md-text .codeblock {
+  margin: 0 0 10px;
+  border-radius: var(--radius-m);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.md-text .codeblock .cb-bar {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px 5px 14px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: rgba(233, 231, 224, 0.55);
+}
+.md-text .codeblock .cb-copy {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: rgba(233, 231, 224, 0.65);
+  transition: background var(--dur), color var(--dur);
+}
+.md-text .codeblock .cb-copy:hover { background: rgba(255, 255, 255, 0.08); color: var(--code-text); }
+.md-text .codeblock pre {
+  margin: 0;
+  padding: 12px 14px 14px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--code-text);
+}
+.md-text .codeblock pre code { background: none; border: none; padding: 0; font-size: inherit; }
+
+.md-text .md-table-wrap {
+  margin: 0 0 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+.md-text table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.md-text th, .md-text td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.md-text th { background: var(--panel-soft); font-weight: 600; font-size: 12.5px; }
+.md-text tr:last-child td { border-bottom: none; }
+
+.md-text blockquote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--text-soft);
+}
+.md-text a { color: var(--accent); text-decoration: none; }
+.md-text a:hover { text-decoration: underline; }
+.md-text hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
+.md-text strong { font-weight: 600; }

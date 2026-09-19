@@ -1,0 +1,35 @@
+MIT License
+
+Copyright (c) 2026 Ordo Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+
+Trademark notice (附加商标注记，中文为准)
+
+This MIT license grants rights to the source code only. The name "Ordo" and
+the owl logo (including all variants shipped in build/brand/ and docs/ordo_logo/)
+are trademarks of the project owner and are NOT transferred, licensed, or
+waived under this license. Derivative works must not use the Ordo name or the
+owl logo for branding, promotion, or distribution of their products.
+
+本许可仅授予源代码相关权利。"Ordo" 名称与猫头鹰 Logo（含 build/brand/ 与
+docs/ordo_logo/ 中的全部变体）为项目所有者的商标，不随本 MIT 授权转移；
+衍生作品不得将 Ordo 名称或猫头鹰 Logo 用于其产品的品牌、宣传或分发。

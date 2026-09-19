@@ -1,0 +1,210 @@
+{
+  "model": {
+    "providerId": "deepseek",
+    "providerName": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "apiKey": "sk-replace-with-your-own-key",
+    "models": [
+      {
+        "id": "deepseek-v4-flash",
+        "name": "DeepSeek V4 Flash",
+        "contextWindow": 1000000,
+        "maxTokens": 16384,
+        "thinkingLevelMap": {
+          "low": "low",
+          "medium": "high",
+          "high": "high"
+        }
+      }
+    ],
+    "thinking": {
+      "levels": [
+        {
+          "id": "off",
+          "label": "关闭"
+        },
+        {
+          "id": "low",
+          "label": "低"
+        },
+        {
+          "id": "medium",
+          "label": "中"
+        },
+        {
+          "id": "high",
+          "label": "高"
+        }
+      ],
+      "defaultId": "medium",
+      "budgets": {
+        "low": 512,
+        "medium": 2048,
+        "high": 8192
+      }
+    }
+  },
+  "mockModel": {
+    "providerId": "ordo-intranet",
+    "providerName": "Ordo 内网模型",
+    "baseUrl": "http://127.0.0.1:8787/v1",
+    "apiKeyEnv": "ORDO_MOCK_API_KEY",
+    "models": [
+      {
+        "id": "ordo-mock-llm",
+        "name": "Ordo Mock LLM",
+        "contextWindow": 128000,
+        "maxTokens": 8192
+      }
+    ]
+  },
+  "compaction": {
+    "enabled": true,
+    "contextRatio": 1,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  },
+  "browser": {
+    "urlWhitelist": []
+  },
+  "basePrompt": "你是 Ordo 企业助手。以下是基座层规范，任何专家模式下均生效，不可被覆盖：\n- 安全红线：只能访问工作区内路径；写操作直接调用 write_file 发起，由系统弹出确认卡经本人确认后执行（不要改为在对话中口头征求许可）\n- 输出规范：中文、简洁、结论可溯源到来源文件\n- 工具：读文件 read_file、写文件 write_file、列目录 list_files、沉淀技能 save_skill、更新计划 update_plan，路径相对工作区\n- 计划：多步骤任务开始时先用 update_plan 列出步骤清单（全部 pending），随执行推进更新各步骤状态（running/done），让用户随时可见进度\\n- 命令：查目录/读文本/搜字符串等只读操作可用 run_command（白名单内免确认自动执行）；其余命令会弹确认卡；文件写入仍用 write_file\n- 连接器：mcp__ 开头的是企业系统工具（ERP/OA 等，只读为主），按会话挂载；调用结果注明数据来源，不得虚构未返回的数据\n- 知识库：涉及公司制度/规范/历史文档的问题先用 search_knowledge 检索（挂载了知识库才可用），回答引用来源（库/文档/小节）；检索不到就明说，不编造\n- 流程沉淀：用户要求把本次流程做成技能/沉淀复用时，用 save_skill 把验证过的流程整理为个人技能（SKILL.md 正文写流程、输出结构、数据口径；模板清单等作为附加文件打包）\n- 完成任务后简短汇报结果\n- 诚实汇报：工具执行失败、被拦截或未执行时，必须如实告知用户未完成与原因，严禁声称已完成",
+  "experts": {
+    "defaultId": "general",
+    "items": [
+      {
+        "id": "general",
+        "name": "通用助手",
+        "description": "日常问答与办公任务（默认，全量技能）",
+        "rolePrompt": "当前角色：通用助手，处理各类日常办公任务。",
+        "skillWhitelist": null,
+        "mcpWhitelist": null,
+        "kbWhitelist": null
+      },
+      {
+        "id": "drawing-checker",
+        "name": "图纸核对工程师",
+        "description": "图纸/数据一致性核对（业务收窄演示：不挂技能，基础工具与通用一致）",
+        "rolePrompt": "当前角色：图纸核对工程师，专注图纸与数据的一致性核对，输出核对表与结论；周报写作类任务非本角色专长，仅按用户明确要求执行。",
+        "skillWhitelist": [],
+        "mcpWhitelist": [],
+        "kbWhitelist": []
+      },
+      {
+        "id": "doc-writer",
+        "name": "文档写作助手",
+        "description": "报告与文档撰写",
+        "rolePrompt": "当前角色：文档写作助手，擅长结构化报告（标题 / 要点 / 结论）。",
+        "skillWhitelist": null,
+        "mcpWhitelist": null,
+        "kbWhitelist": null
+      }
+    ]
+  },
+  "skillRegistry": [
+    {
+      "name": "erp-inventory-query",
+      "version": "1.0.0",
+      "description": "查询 ERP 库存数据时使用：规定查询口径与结果表格结构（只读）",
+      "updatePolicy": "auto",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: erp-inventory-query\ndescription: 查询 ERP 库存数据时使用：规定查询口径与结果表格结构（只读）\nversion: 1.0.0\n---\n\n# ERP 库存查询规范\n\n1. 查询条件必须含物料编码或名称关键字与仓库范围；\n2. 结果按「物料编码 / 名称 / 仓库 / 现存量 / 可用量」表格输出；\n3. 只做查询汇总，不产生任何写操作。\n"
+        }
+      ]
+    }
+  ],
+  "skillSubmissions": [],
+  "mcpRegistry": [
+    {
+      "name": "erp",
+      "displayName": "ERP 连接器",
+      "description": "查询 ERP 库存与物料主数据（只读，管理端托管执行）",
+      "endpoint": "https://erp-gw.corp.local/mcp",
+      "tools": [
+        {
+          "name": "query_inventory",
+          "label": "查 ERP 库存",
+          "level": "L1",
+          "description": "按物料编码或名称关键字查询 ERP 库存，返回物料编码/名称/仓库/现存量/可用量。只读。",
+          "params": [
+            {
+              "name": "keyword",
+              "type": "string",
+              "description": "物料编码或名称关键字",
+              "required": true
+            }
+          ],
+          "mockResult": "物料A / 标准件A / 上海一仓 / 现存量 100 / 可用量 95\n物料A / 标准件A / 苏州二仓 / 现存量 40 / 可用量 40"
+        },
+        {
+          "name": "get_material",
+          "label": "查物料主数据",
+          "level": "L1",
+          "description": "按物料编码查询 ERP 物料主数据（名称/规格/单位/默认仓库）。只读。",
+          "params": [
+            {
+              "name": "code",
+              "type": "string",
+              "description": "物料编码",
+              "required": true
+            }
+          ],
+          "mockResult": "物料A：标准件A，规格 M8x40，单位 件，默认仓 上海一仓"
+        }
+      ]
+    }
+  ],
+  "kbRegistry": [
+    {
+      "id": "kb-hr-policies",
+      "name": "公司制度库",
+      "description": "人事与行政制度（差旅报销、考勤、印章使用），管理端代理检索",
+      "docs": [
+        {
+          "name": "差旅报销制度.md",
+          "chunks": [
+            {
+              "text": "## 住宿标准\n\n国内差旅住宿标准：一线城市每晚上限 600 元，其他城市每晚上限 400 元；超标部分自理。",
+              "section": "住宿标准"
+            },
+            {
+              "text": "## 报销时限\n\n差旅费用须在返回后 15 个工作日内提交报销，逾期需说明原因并经部门负责人签批。",
+              "section": "报销时限"
+            }
+          ]
+        },
+        {
+          "name": "考勤制度.md",
+          "chunks": [
+            {
+              "text": "## 工作时间\n\n标准工时为 9:00-18:00，午休 12:00-13:30；弹性上下班 ±30 分钟，需当月补足工时。",
+              "section": "工作时间"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "shell": {
+    "enabled": true,
+    "readOnlyCommands": [
+      "dir",
+      "Get-ChildItem",
+      "Get-Content",
+      "Get-Item",
+      "Get-Location",
+      "Tree",
+      "Type",
+      "Get-Date",
+      "Whoami",
+      "Findstr",
+      "Where.exe",
+      "Select-String"
+    ],
+    "defaultTimeoutSec": 60
+  },
+  "admin": {
+    "baseUrl": ""
+  }
+}

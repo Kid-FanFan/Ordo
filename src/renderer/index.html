@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Ordo</title>
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/layout.css" />
+  <link rel="stylesheet" href="styles/theme.css" />
+  <link rel="stylesheet" href="styles/chat.css" />
+  <link rel="stylesheet" href="styles/markdown.css" />
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+</head>
+<body>
+  <!-- M6-B 模式与登录 gate：unconfigured=首启欢迎页 / locked=联机待登录（含运行中 token 过期）。覆盖全屏，主界面不可用 -->
+  <div id="auth-gate" class="hidden">
+    <div class="gate-card">
+      <div class="gate-logo"><span class="logo-mark" data-icon="logo"></span>Ordo</div>
+      <div id="gate-welcome">
+        <div class="gate-title">选择使用模式</div>
+        <div class="gate-sub">联机接入企业管理端，或单机使用本地能力</div>
+        <button id="gate-online-btn" class="gate-choice" type="button">
+          <span class="gc-icon" data-icon="cloud"></span>
+          <span class="gc-text"><b>接入企业管理端</b><i>企业技能 / 插件包 / 连接器 / 知识库 / 统一模型网关，需工号登录</i></span>
+        </button>
+        <button id="gate-standalone-btn" class="gate-choice" type="button">
+          <span class="gc-icon" data-icon="laptop"></span>
+          <span class="gc-text"><b>单机模式</b><i>无需登录；使用本地技能 / 个人知识库 / 自动化，大模型自行配置</i></span>
+        </button>
+      </div>
+      <div id="gate-login" class="hidden">
+        <div class="gate-title">登录 Ordo</div>
+        <div class="gate-sub" id="gate-login-sub">输入企业管理端地址与账号</div>
+        <label class="gate-field">管理端地址<input id="gate-base" type="text" placeholder="http://admin.corp.local:8600" autocomplete="off" spellcheck="false" /></label>
+        <label class="gate-field">工号<input id="gate-emp" type="text" placeholder="如 1024" autocomplete="off" spellcheck="false" /></label>
+        <label class="gate-field">密码<input id="gate-pass" type="password" autocomplete="off" /></label>
+        <div id="gate-error" class="gate-error hidden"></div>
+        <button id="gate-submit" class="btn gate-submit" type="button">登 录</button>
+        <button id="gate-back" class="gate-link" type="button">← 返回选择模式（或改用单机模式）</button>
+      </div>
+      <div id="gate-restarting" class="hidden">
+        <div class="gate-title">正在切换…</div>
+        <div class="gate-sub" id="gate-restart-sub"></div>
+      </div>
+    </div>
+  </div>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="side-head"><span class="logo-mark" data-icon="logo"></span>Ordo</div>
+      <button id="new-session" type="button"><span data-icon="plus"></span>新建会话</button>
+      <nav class="side-nav">
+        <button id="nav-skills" data-module="skills" type="button"><span data-icon="layers"></span>技能市场</button>
+        <button id="nav-connectors" data-module="connectors" type="button"><span data-icon="plug"></span>连接器</button>
+        <button id="nav-automations" data-module="automations" type="button"><span data-icon="clock"></span>自动化</button>
+        <button id="nav-kb" data-module="kb" type="button"><span data-icon="book"></span>知识库</button>
+        <button id="nav-experts" data-module="experts" type="button"><span data-icon="user"></span>专家</button>
+        <button id="nav-commands" data-module="commands" type="button"><span data-icon="slash"></span>快捷命令</button>
+        <button id="nav-packs" data-module="packs" type="button"><span data-icon="archive"></span>插件包</button>
+      </nav>
+      <div class="side-nav-divider"></div>
+      <div class="session-search" id="session-search-wrap">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="session-search" type="text" placeholder="搜索会话" autocomplete="off" spellcheck="false" />
+        <kbd>Ctrl K</kbd>
+      </div>
+      <nav id="session-list"></nav>
+      <div class="side-foot">
+        <button class="user-chip" id="user-chip" type="button" title="个人信息">
+          <span class="avatar" id="user-avatar"></span>
+          <span class="u-main"><span class="u-name" id="user-name"></span><span class="u-dept" id="user-dept"></span></span>
+        </button>
+        <button class="foot-gear" id="open-settings" type="button" title="设置"><span data-icon="settings"></span></button>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="topbar">
+        <div id="session-title">新会话</div>
+        <div class="spacer"></div>
+        <button id="wb-toggle" type="button"><span data-icon="panelRight"></span><span>预览面板</span></button>
+      </header>
+
+      <div id="content-row">
+        <div id="chat-pane">
+          <div id="progress-bubble" class="idle" title="任务进度">
+            <span class="pb-dot"></span>
+            <span class="pb-label"></span>
+          </div>
+          <div id="scroller">
+            <div id="thread"></div>
+          </div>
+          <button id="jump-bottom" class="hidden" type="button"><span data-icon="arrowDown"></span>回到底部</button>
+
+          <footer id="composer-wrap">
+            <div id="composer-stack">
+              <!-- 运行中消息：待定条目（输入框右上方；发送即默认排队，可切引导/撤回/删除） -->
+              <div id="queue-area" class="hidden">
+                <div id="queue-items"></div>
+              </div>
+              <div id="attach-row" class="attach-row hidden"></div>
+              <div class="composer" id="composer">
+              <textarea id="input" rows="1" placeholder="给 Ordo 下达任务…（@文件 /命令 $技能，可拖拽/粘贴文件）"></textarea>
+              <div class="composer-bar">
+                <button class="pill" id="attach-btn" type="button" title="上传附件（文档 / 图片 / 压缩包）"><span data-icon="paperclip"></span></button>
+                <button class="pill icon-only" id="skill-btn" type="button" title="技能（SKILL，可用 $技能 触发）"><span data-icon="layers"></span><span class="pill-badge hidden"></span></button>
+                <button class="pill icon-only" id="kb-btn" type="button" title="知识库（选择要检索的库）"><span data-icon="book"></span><span class="pill-badge hidden"></span></button>
+                <button class="pill icon-only" id="conn-btn" type="button" title="连接器（企业系统与个人 MCP 工具，会话内挂载生效）"><span data-icon="plug"></span><span class="pill-badge hidden"></span></button>
+                <div class="spacer"></div>
+                <button class="pill" id="model-btn" type="button" title="切换模型（管理端已配置，员工仅可切换）"></button>
+                <button class="pill" id="thinking-btn" type="button"></button>
+                <button id="send-btn" type="button" disabled></button>
+              </div>
+              </div>
+              <!-- 会话设置行：工作区 + 专家，均只在新建会话时可选，首条消息发出即随会话锁定（PRD 3.8/3.10） -->
+              <div id="ws-option-row" class="ws-option-row">
+                <button id="ws-btn" class="ws-option" type="button" title="选择工作区（会话创建后锚定）"></button>
+                <button id="expert-btn" class="ws-option" type="button" title="选择专家（会话创建后锁定）"></button>
+                <span class="ws-option-hint">会话将锚定此工作区与专家；发送首条消息后锁定</span>
+              </div>
+            </div>
+          </footer>
+        </div>
+
+        <!-- 右侧预览面板（标签化容器）：文件/终端/浏览器各占一标签，＋新标签页，×收起 -->
+        <aside id="workbench">
+          <div id="wb-resizer" title="拖动调整宽度"></div>
+          <div class="wb-head">
+            <div class="wb-tabs" id="wb-tabs"></div>
+            <button id="wb-plus" type="button" title="新建标签页（终端 / 文件 / 浏览器）">＋</button>
+            <button id="wb-collapse" type="button" title="收起面板"><span data-icon="close"></span></button>
+          </div>
+          <div class="wb-body" id="wb-body"></div>
+        </aside>
+
+        <!-- 企业管控市场页：切换右侧主区域（对齐 ChatGPT GPT 商店 / Kimi 工具市场 / WorkBuddy 技能市场页） -->
+        <section id="module-page" class="hidden">
+          <div class="mkp-head">
+            <button class="mv-back" id="mv-back" type="button" title="返回对话"><span data-icon="arrowLeft"></span><span class="mv-back-label" id="mv-back-label"></span></button>
+            <span class="mkp-title" id="mv-title"></span>
+            <div class="mk-search" id="mkp-search"></div>
+          </div>
+          <div class="mkp-body" id="mv-body"></div>
+          <div class="mkp-foot" id="mv-foot"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import { boot } from "./js/app.js";
+    import { icon } from "./js/icons.js";
+
+    document.querySelectorAll("[data-icon]").forEach((n) => {
+      n.innerHTML = icon(n.dataset.icon, n.classList.contains("logo-mark") ? 20 : 16);
+    });
+
+    // Electron：preload 注入 window.ordo（契约见 docs §7，锁定；扩展提案以 ?. 降级）
+    boot(window.ordo ?? null);
+  </script>
+</body>
+</html>

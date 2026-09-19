@@ -1,0 +1,100 @@
+{
+  "name": "ordo-client",
+  "productName": "Ordo",
+  "version": "0.1.0",
+  "description": "Ordo 企业 Agent 平台客户端（原型骨架）",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "mock": "node tools/mock-server.mjs",
+    "selftest": "node scripts/selftest.mjs",
+    "selftest:mock": "node scripts/selftest.mjs --mock",
+    "postinstall": "install-electron",
+    "icon": "node tools/make-icon.cjs",
+    "dist": "npm run build && npx electron-builder --win nsis",
+    "dist:dir": "npm run build && npx electron-builder --win --dir"
+  },
+  "config": {
+    "electron_mirror": "https://npmmirror.com/mirrors/electron/"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@larksuiteoapi/node-sdk": "^1.73.3",
+    "@officecli/officecli": "^1.0.146",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "adm-zip": "^0.6.0",
+    "better-sqlite3": "^13.0.3",
+    "dingtalk-stream": "^2.1.6-beta.1",
+    "docx-preview": "^0.4.0",
+    "mammoth": "^1.12.2",
+    "node-pty": "^1.1.0",
+    "pdf-parse": "^2.4.5",
+    "pptx-viewer": "^0.2.2",
+    "tesseract.js": "^7.0.0",
+    "vectra": "^0.15.0",
+    "ws": "^8.21.3",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "electron": "latest",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.6.0"
+  },
+  "build": {
+    "appId": "cn.ordo.client",
+    "productName": "Ordo",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "src/renderer/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**",
+      "node_modules/better-sqlite3/**",
+      "node_modules/tesseract.js/**",
+      "node_modules/tesseract.js-core/**"
+    ],
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "artifactName": "Ordo-${version}-setup.${ext}",
+      "shortcutName": "Ordo"
+    },
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "node_modules/@officecli/officecli",
+        "to": "officecli"
+      },
+      {
+        "from": "tessdata",
+        "to": "tessdata"
+      }
+    ]
+  }
+}

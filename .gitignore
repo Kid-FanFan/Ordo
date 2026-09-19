@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+*.log
+tools/bodies.jsonl
+tools/pi-request.json
+release*/
+
+# 图标生成中间产物（node tools/make-icon.cjs 可再生）
+build/icon-src/

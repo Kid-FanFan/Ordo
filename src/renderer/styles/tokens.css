@@ -1,0 +1,39 @@
+/* ===== tokens.css ===== */
+/* Ordo 设计令牌（暖纸色亮主题 + 深锈红 accent，详见 README）*/
+
+:root {
+  /* 色板：暖纸色亮色主题 */
+  --bg: #f7f6f3;
+  --panel: #ffffff;
+  --panel-soft: #f1efe9;
+  --text: #21201c;
+  --text-soft: #5f5b52;
+  --text-faint: #98938a;
+  --line: #e6e3db;
+  --line-strong: #d8d4c9;
+  --ink: #26251f;
+  --ink-hover: #3a3830;
+  --accent: #a84b38;
+  --accent-soft: rgba(168, 75, 56, 0.1);
+  --ok: #1d8a4e;
+  --ok-soft: rgba(29, 138, 78, 0.1);
+  --warn: #b36205;
+  --warn-soft: #fdf6ec;
+  --warn-line: #ecd9b7;
+  --danger: #a12d2d;
+  --danger-soft: #fbf0ef;
+  --code-bg: #26251f;
+  --code-text: #e9e7e0;
+
+  /* 字体 */
+  --sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+
+  /* 栅格与形状 */
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
+  --shadow-s: 0 1px 2px rgba(33, 32, 28, 0.05);
+  --shadow-m: 0 8px 24px rgba(33, 32, 28, 0.1);
+  --dur: 140ms;
+}

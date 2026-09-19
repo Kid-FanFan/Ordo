@@ -1,0 +1,378 @@
+/* ===== chat.css ===== */
+/* 对话流组件：用户气泡 / 思考块 / 活动组 / 确认卡 / chip / 压缩卡 / 错误卡 —— 对应设计文档 §4 */
+
+/* ---------- 回合与通用 ---------- */
+.turn { display: flex; flex-direction: column; }
+.turn > * + * { margin-top: 12px; }
+.turn + .turn { margin-top: 28px; }
+
+/* ---------- 用户消息 ---------- */
+.msg-user {
+  align-self: flex-end;
+  max-width: 78%;
+  padding: 10px 14px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--panel-soft);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- AI 正文块 ---------- */
+.md-text { font-size: 14px; line-height: 1.7; word-break: break-word; }
+.md-text .cursor {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  border-radius: 1px;
+  background: var(--text-soft);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ---------- 思考块 ---------- */
+.thinking {
+  border-left: 2px solid var(--line-strong);
+  padding: 2px 0 2px 14px;
+}
+.thinking-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  cursor: pointer;
+  user-select: none;
+}
+.thinking-head svg { color: var(--text-faint); }
+.thinking-head .chev { margin-left: auto; transition: transform var(--dur); }
+.thinking.open .thinking-head .chev { transform: rotate(180deg); }
+.thinking-head .secs { font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+.thinking-body {
+  display: none;
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  max-height: 132px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.thinking.open .thinking-body { display: block; }
+
+/* shimmer 状态文字 */
+.shimmer {
+  background: linear-gradient(100deg, var(--text-faint) 40%, var(--text) 50%, var(--text-faint) 60%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -80% 0; }
+}
+
+/* ---------- 活动组 ---------- */
+.group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--panel);
+  overflow: hidden;
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  text-align: left;
+}
+.group-head svg { color: var(--text-faint); }
+.group-head .g-secs { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.group-head .chev { color: var(--text-faint); transition: transform var(--dur); }
+.group.open .group-head .chev { transform: rotate(180deg); }
+.group-list { display: none; border-top: 1px solid var(--line); padding: 4px 0; }
+.group.open .group-list { display: block; }
+
+/* 回合过程折叠：整段执行过程收进一行（组中组）；内层元素扁平化避免盒中盒 */
+.turn-fold .group-list { padding: 6px 4px; }
+.turn-fold .group-list > * + * { margin-top: 8px; }
+.turn-fold .thinking { margin-left: 4px; }
+.turn-fold .md-text { font-size: 13px; color: var(--text-soft); }
+.turn-fold .confirm-card { margin: 0; }
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+}
+.tool-row.l2 { box-shadow: inset 3px 0 0 var(--warn); }
+.tool-row .t-icon { color: var(--text-faint); display: flex; }
+.tool-row .t-name { flex: none; font-weight: 500; color: var(--text); }
+.tool-row .t-target {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-row .t-dur { flex: none; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.tool-row .t-status { flex: none; display: flex; color: var(--text-faint); }
+.tool-row.done .t-status { color: var(--ok); }
+.tool-row.rejected { color: var(--text-faint); }
+.tool-row.rejected .t-name { text-decoration: line-through; }
+.tool-row.rejected .t-status { color: var(--text-faint); }
+
+.spinner { animation: spin 0.9s linear infinite; color: var(--accent) !important; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- L2 内联确认卡 ---------- */
+.confirm-card {
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-m);
+  background: var(--warn-soft);
+  padding: 12px 14px;
+}
+.confirm-card.pending { animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(179, 98, 5, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(179, 98, 5, 0.12); }
+}
+.confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warn);
+}
+.confirm-head .c-tool { margin-left: auto; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--text-faint); }
+.confirm-sec { margin-top: 10px; }
+.confirm-sec .c-label { font-size: 11px; color: var(--text-faint); margin-bottom: 3px; }
+.confirm-sec .c-path { font-family: var(--mono); font-size: 12.5px; color: var(--text); word-break: break-all; }
+.confirm-sec .c-abs { margin-top: 2px; font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); word-break: break-all; }
+.confirm-sec .c-preview {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  scrollbar-width: thin;
+}
+.confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.confirm-actions .esc-hint { margin-right: auto; font-size: 11px; color: var(--text-faint); }
+.btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-s);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  transition: background var(--dur), border-color var(--dur), transform var(--dur);
+}
+.btn:active { transform: scale(0.97); }
+.btn-ghost { border-color: var(--line-strong); color: var(--text-soft); background: var(--panel); }
+.btn-ghost:hover { border-color: var(--text-faint); color: var(--text); }
+.btn-ink { background: var(--ink); color: #fff; }
+.btn-ink:hover { background: var(--ink-hover); }
+.confirm-verdict {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.confirm-verdict.ok { color: var(--ok); }
+.confirm-verdict.deny { color: var(--text-faint); }
+
+/* ---------- 系统提示 chip ---------- */
+.chip {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-soft) 60%, transparent);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.chip svg { width: 12px; height: 12px; }
+
+/* ---------- 上下文压缩卡 ---------- */
+.compaction { border: 1px dashed var(--line-strong); border-radius: var(--radius-m); }
+.compaction-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  text-align: left;
+}
+.compaction-head svg { color: var(--text-faint); }
+.compaction-head .chev { margin-left: auto; color: var(--text-faint); transition: transform var(--dur); }
+.compaction.open .compaction-head .chev { transform: rotate(180deg); }
+.compaction-body {
+  display: none;
+  margin: 0 14px 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-s);
+  background: var(--panel-soft);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.compaction.open .compaction-body { display: block; }
+
+/* ---------- 错误卡 ---------- */
+.error-card {
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-s);
+  background: var(--danger-soft);
+  padding: 12px 14px;
+}
+.error-card .e-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--danger); }
+.error-card .e-row { margin-top: 6px; font-size: 12.5px; line-height: 1.6; color: var(--text-soft); }
+.error-card .e-row b { font-weight: 600; color: var(--text); }
+
+/* ---------- AI 消息 hover 操作 ---------- */
+.msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+.md-text:hover + .msg-actions, .msg-actions:hover { opacity: 1; }
+.msg-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.msg-actions button:hover { background: var(--panel-soft); color: var(--text-soft); }
+
+/* ---------- 文件交付卡片 ---------- */
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--panel);
+}
+.file-card .f-icon { display: flex; color: var(--accent); }
+.file-card .f-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.file-card .f-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.file-card .f-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-card .f-badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 9.5px;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+}
+.file-card .f-path {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-card .f-copy {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-soft);
+  transition: background var(--dur), border-color var(--dur);
+}
+.file-card .f-copy:hover { background: var(--panel-soft); border-color: var(--text-faint); }
+
+/* ---------- 计划 / Todo 卡（契约扩展事件；Kimi Todo / ZCode 计划式） ---------- */
+.plan {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--accent) 3%, var(--panel));
+  overflow: hidden;
+}
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  text-align: left;
+}
+.plan-head svg { color: var(--accent); }
+.plan-head .p-secs { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.plan-head .chev { color: var(--text-faint); transition: transform var(--dur); }
+.plan.open .plan-head .chev { transform: rotate(180deg); }
+.plan-list { display: none; border-top: 1px solid var(--line); padding: 6px 0; }
+.plan.open .plan-list { display: block; }
+.plan-step { display: flex; align-items: center; gap: 9px; padding: 5px 14px; font-size: 12.5px; color: var(--text-soft); }
+.plan-step .ps-icon { display: flex; color: var(--text-faint); }
+.plan-step.done .ps-icon { color: var(--ok); }
+.plan-step.running .ps-icon { color: var(--accent); }
+.plan-step.running .ps-text { color: var(--text); font-weight: 500; }
+.plan-step.done .ps-text { color: var(--text-faint); }
+
+/* ---------- 打字动画（首 token 前） ---------- */
+.typing { display: inline-flex; gap: 4px; padding: 6px 0; }
+.typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: typing 1.2s ease-in-out infinite;
+}
+.typing span:nth-child(2) { animation-delay: 0.15s; }
+.typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}

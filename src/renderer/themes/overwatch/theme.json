@@ -1,0 +1,56 @@
+{
+  "id": "overwatch",
+  "name": "守望先锋",
+  "author": "Ordo",
+  "description": "《守望先锋》主题 — 深蓝科技底色 + 橙色强调 + 英雄背景",
+  "colors": {
+    "--bg": "#0a1628",
+    "--panel": "#111e33",
+    "--panel-soft": "#162640",
+    "--text": "#dce6f0",
+    "--text-soft": "#8ea4be",
+    "--text-faint": "#5a7a9a",
+    "--line": "#1e3450",
+    "--line-strong": "#2a4466",
+    "--ink": "#dce6f0",
+    "--ink-hover": "#ffffff",
+    "--accent": "#f99e1a",
+    "--accent-soft": "rgba(249,158,26,0.15)",
+    "--ok": "#3be06a",
+    "--ok-soft": "rgba(59,224,106,0.12)",
+    "--warn": "#f99e1a",
+    "--warn-soft": "rgba(249,158,26,0.1)",
+    "--warn-line": "#5c4e1a",
+    "--danger": "#ff4655",
+    "--danger-soft": "rgba(255,70,85,0.12)",
+    "--code-bg": "#060e1c",
+    "--code-text": "#8ea4be"
+  },
+  "titleBar": {
+    "color": "#0a1628",
+    "symbolColor": "#8ea4be"
+  },
+  "background": {
+    "image": "bg.png",
+    "opacity": 0.18,
+    "blur": 4
+  },
+  "icons": {
+    "logo": "ow.png",
+    "layers": "dgn1.png",
+    "plug": "link.png",
+    "clock": "move.png",
+    "book": "text.png",
+    "user": "person.png",
+    "slash": "cross.png",
+    "archive": "alternate.png",
+    "palette": "pointer.png",
+    "settings": "dgn2.png",
+    "plus": "cross.png"
+  },
+  "style": {
+    "sidebarBorder": "1px solid rgba(249,158,26,0.2)",
+    "cardGlow": "0 0 12px rgba(249,158,26,0.15)",
+    "accentGradient": "linear-gradient(135deg, #f99e1a, #ff6b2b)"
+  }
+}
