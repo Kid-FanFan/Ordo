@@ -5,7 +5,7 @@ import { initTheme, loadSavedTheme, renderThemeContent } from "./theme.js";
 import {
   addUserMsg, createThinking, createThinkingStatic, createToolRow, createTurnFold,
   createConfirm, createChip, createCompaction, createError, createTyping, createTextBlock, createTextStatic, el,
-  createFileCard, extractWrittenPath, createPlan, createMsgActions, attKind, attBadge,
+  createFileCard, createFileGroup, createPlan, createMsgActions, attKind, attBadge,
 } from "./ui.js";
 
 // ===== js/app.js =====
@@ -40,7 +40,7 @@ const state = {
   thinking: null,      // 思考块指针
   typing: null,
   pendingConfirm: null, // { id, card }
-  pendingFile: null,    // 文件交付卡待渲染：{ path: string|null }（write_file 成功后置位）
+  pendingFiles: [],    // 本回合待渲染交付卡的目标路径（write_file / Office 五件成功后置入，assistant_done 消费）
   plan: null,           // 计划卡指针（plan_update 契约扩展事件；未扩展时恒为 null）
   drawer: null,         // 右侧抽屉（技能/自动化管理面共用）
   wb: { open: false, preview: null, resolution: null, newTab: null }, // 右侧预览面板（方案 D4：去工作台化，纯预览容器）；newTab = 新标签页 { view }
@@ -309,7 +309,7 @@ function handleEvent(ev) {
         ensureTurn().appendChild(addUserMsg(ev.prompt)); // 自测/e2e 从主进程注入提示词时不经过 send()，补画用户气泡
       }
       state.userBubbleShown = true;
-      state.pendingFile = null;
+      state.pendingFiles = [];
       state.plan = null;
       state.lastAnswerRaw = ""; // 新回合清空上一轮回答缓存
       state.bubble.steps = [];
@@ -364,17 +364,21 @@ function handleEvent(ev) {
       closeThinking();
       // 捕获最终回答原文（消息操作条用）：assistant_done 先于 run_end，run_end 时 textBlock 已关闭
       state.lastAnswerRaw = state.textBlock ? state.textBlock.raw : "";
-      // 文件交付卡：write_file 成功后展示成果物（路径优先取确认参数，其次从正文反引号路径提取）
-      if (state.pendingFile) {
-        const p = state.pendingFile.path || (state.textBlock ? extractWrittenPath(state.textBlock.raw) : null);
-        if (p) {
-          const card = createFileCard(p, openArtifactPreview, revealArtifact);
-          registerArtifact(p);
+      // 文件交付卡：write_file / Office 五件成功后展示成果物。
+      // 单槽改回合级集合：并行多写不再丢卡（原 pendingFile 只留第一个）；≥3 个收成汇总卡（方案 A）
+      if (state.pendingFiles.length) {
+        const uniqPaths = [...new Set(state.pendingFiles.map(String))];
+        for (const p of uniqPaths) registerArtifact(p);
+        const cards =
+          uniqPaths.length >= 3
+            ? [createFileGroup(uniqPaths, openArtifactPreview, revealArtifact)]
+            : uniqPaths.map((p) => createFileCard(p, openArtifactPreview, revealArtifact));
+        for (const card of cards) {
           if (state.textBlock) state.textBlock.node.after(card);
           else ensureTurn().appendChild(card);
-          scrollBottom();
         }
-        state.pendingFile = null;
+        scrollBottom();
+        state.pendingFiles = [];
       }
       closeTextBlock();
       break;
@@ -386,6 +390,7 @@ function handleEvent(ev) {
       // B 方案：无组卡，工具步骤行独立流式出现；回合结束统一收进折叠行
       {
         const row = createToolRow(ev.name, ev.args || {}, ev.level === "L2");
+        row.targetPath = ev.path || null; // 写文件类工具的目标相对路径（主进程自 tool args 转发，任何确认模式都有）
         append(row.node);
         state.runningRows.push(row);
         state.lastToolRow = row;
@@ -397,9 +402,10 @@ function handleEvent(ev) {
       const row = state.runningRows.filter((r) => r.status === "running").pop();
       if (row) {
         row.end(row.rejected);
-        // 写文件成功 → 待渲染交付卡（L2 路径来自确认参数；被拒绝则不渲染）
-        if (row.name === "write_file" && !row.rejected && !state.pendingFile) {
-          state.pendingFile = { path: row.confirmPath || null };
+        // 写文件成功 → 待渲染交付卡（路径来自 tool_start 转发，确认卡参数兜底；被拒绝则不渲染）
+        if (row.name === "write_file" && !row.rejected) {
+          const p = row.targetPath || row.confirmPath;
+          if (p) state.pendingFiles.push(String(p));
         }
       }
       break;
@@ -460,8 +466,9 @@ function handleEvent(ev) {
       break;
 
     case "artifact_added":
-      // 非 write_file 链路的交付物（如浏览器截图存证）：登记进浮层清单
+      // 交付物登记：浏览器截图等只进浮层清单；Office 五件（带 tool 标记）同时进当轮交付卡
       registerArtifact(ev.path, true);
+      if (ev.tool) state.pendingFiles.push(String(ev.path));
       break;
 
     case "confirm_request": {
@@ -535,7 +542,7 @@ function handleEvent(ev) {
           mountAnswerActions();
         }
       }
-      state.pendingFile = null;
+      state.pendingFiles = [];
       state.bubble.runActive = false;
       if (!state.bubble.error) state.bubble.ranOnce = true;
       state.userBubbleShown = false; // 回合收束：下一回合（含主进程直驱）重新判定补画
@@ -668,8 +675,9 @@ function renderHistory(messages) {
       flushFold();
       ensureTurn().appendChild(createCompaction({ messagesBefore: m.messagesBefore, messagesAfter: m.messagesAfter, tokensBefore: m.tokensBefore, summary: m.summary || m.text || "" }));
     } else if (m.role === "assistant") {
+      // 写文件类工具（write_file + Office 五件）的产出/改动：与实况回合同一口径出交付卡
       const written = (m.content || [])
-        .filter((c) => c && c.type === "toolCall" && c.name === "write_file" && c.arguments?.path)
+        .filter((c) => c && c.type === "toolCall" && DELIVERY_TOOLS.has(c.name) && c.arguments?.path)
         .map((c) => String(c.arguments.path));
       for (const c of m.content || []) {
         if (c.type === "thinking") {
@@ -686,10 +694,12 @@ function renderHistory(messages) {
           answerEl = createTextStatic(c.text);
         }
       }
-      // 交付卡：历史中写入文件的成果物（quiet：加载历史不自动弹工作台）；留在折叠外
-      for (const p of written) {
-        registerArtifact(p, true);
-        fileBuf.push(createFileCard(p, openArtifactPreview, revealArtifact));
+      // 交付卡：历史中写入文件的成果物（quiet：加载历史不自动弹工作台）；留在折叠外；≥3 个收汇总卡
+      if (written.length) {
+        const uniq = [...new Set(written)];
+        for (const p of uniq) registerArtifact(p, true);
+        if (uniq.length >= 3) fileBuf.push(createFileGroup(uniq, openArtifactPreview, revealArtifact));
+        else for (const p of uniq) fileBuf.push(createFileCard(p, openArtifactPreview, revealArtifact));
       }
     } else if (m.role === "toolResult") {
       // 结果摘要已并入工具行；不渲染
@@ -1934,9 +1944,13 @@ function openArtifactPreview(path) {
   state.wb.activeTab = "file"; // 打开交付物即聚焦文件标签
   openWorkbench();
 }
-// 「打开位置」：系统文件管理器定位（主进程 shell.showItemInFolder，跨平台）
-function revealArtifact(path) {
-  api.revealFile?.(path).catch(() => {});
+// 「打开位置」：系统文件管理器定位（主进程 shell.showItemInFolder，跨平台）。
+// ok:false = 文件与所在目录都已不存在（历史卡片的常见场景：暂存目录已被后续操作清理/搬走）——明示，不静默
+async function revealArtifact(path) {
+  try {
+    const r = await api.revealFile?.(path);
+    if (r && r.ok === false) toast(`文件已不在原位置（可能已被后续操作移动或清理）：${path}`);
+  } catch {}
 }
 
 /* ============ 悬浮进度浮标（方案 §3，D3 语义：计划进度，非工具步骤） ============
@@ -5520,7 +5534,8 @@ thinkingBtn.addEventListener("click", () => {
   });
 });
 
-/* ============ 操作确认模式（三档；进行中的会话保持原模式，新会话生效） ============ */
+/* ============ 操作确认模式（三档；保存后当前对话的下一条消息起生效） ============ */
+const DELIVERY_TOOLS = new Set(["write_file", "write_docx", "write_pptx", "edit_docx", "edit_pptx", "edit_xlsx"]);
 const CONFIRM_MODES = [
   { id: "ask", name: "每次确认", desc: "所有敏感操作（写文件 / 执行命令 / 打开网页等）都弹出确认卡" },
   { id: "autoEdit", name: "自动编辑", desc: "写文件与 Word / PPT / Excel 编辑自动执行；命令、联网、保存技能、连接器仍需确认" },
@@ -5551,9 +5566,9 @@ confirmModeBtn.addEventListener("click", () => {
       confirmMode = prev; // 保存失败回滚按钮显示
     }
     paintConfirmModeBtn();
-    // 生效口径在主进程（会话开始时锁定）：进行中的会话保持原模式，新会话生效
+    // 生效口径在主进程（轮级锁定）：保存后当前对话的下一条消息起生效，一轮内模式恒定
     const name = (CONFIRM_MODES.find((m) => m.id === confirmMode) || {}).name || it.name;
-    toast(state.activeSessionId ? `已切换为「${name}」，新会话生效` : `已切换为「${name}」`);
+    toast(`已保存；当前对话的下一条消息起生效（${name}）`);
   });
 });
 

@@ -292,6 +292,72 @@ export function createFileCard(path, onPreview, onReveal) {
   return node;
 }
 
+/** 紧凑文件行（汇总卡内用）：图标 + 文件名 + 类型徽标 + 行内预览/打开位置 */
+export function createFileRow(path, onPreview, onReveal) {
+  const name = String(path).split(/[\\/]/).pop() || String(path);
+  const extM = name.match(/\.([a-z0-9]+)$/i);
+  const ext = extM ? extM[1].toUpperCase() : "FILE";
+  const node = el("div", "file-row");
+  node.innerHTML =
+    `<span class="f-icon">${icon("fileText", 15)}</span>` +
+    `<span class="f-main"><span class="f-name"></span><span class="f-badge">${escapeText(ext)}</span></span>` +
+    `<span class="f-actions"></span>`;
+  node.querySelector(".f-name").textContent = name;
+  node.title = String(path);
+  const actions = node.querySelector(".f-actions");
+  if (onPreview) {
+    const pv = el("button", "f-copy", `${icon("eye", 12)}预览`);
+    pv.addEventListener("click", () => onPreview(path));
+    actions.appendChild(pv);
+  }
+  if (onReveal) {
+    const rv = el("button", "f-copy", `${icon("folderOpen", 12)}打开位置`);
+    rv.addEventListener("click", () => onReveal(path));
+    actions.appendChild(rv);
+  }
+  return node;
+}
+
+/** 多文件汇总卡（方案 A，≥3 个时收拢）：头行「产出 N 个文件 · 类型统计」，默认铺前 3 行，可展开全部 */
+export function createFileGroup(paths, onPreview, onReveal) {
+  const all = [...new Set(paths.map(String))]; // 去重保序：并行多写同一文件只留一张
+  const node = el("div", "file-group");
+  const PREVIEW_N = 3;
+  const counts = new Map();
+  for (const p of all) {
+    const m = String(p).split(/[\\/]/).pop().match(/\.([a-z0-9]+)$/i);
+    const ext = (m ? m[1] : "file").toUpperCase();
+    counts.set(ext, (counts.get(ext) || 0) + 1);
+  }
+  const statText = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([e, n]) => `${n}×${e}`).join(" · ");
+  const head = el("button", "fg-head");
+  head.innerHTML = `${icon("package", 15)}<span class="fg-title"></span><span class="fg-stat"></span>${icon("chevDown", 13, "chev")}`;
+  head.querySelector(".fg-title").textContent = `产出 ${all.length} 个文件`;
+  head.querySelector(".fg-stat").textContent = statText;
+  const body = el("div", "fg-body");
+  for (const p of all) body.appendChild(createFileRow(p, onPreview, onReveal));
+  const foot = el("button", "fg-foot");
+  const paintFoot = () => {
+    foot.textContent = node.classList.contains("open") ? "收起" : `展开全部 ${all.length} 个`;
+  };
+  foot.addEventListener("click", () => {
+    node.classList.toggle("open");
+    paintFoot();
+  });
+  node.append(head, body);
+  if (all.length > PREVIEW_N) {
+    node.append(foot);
+    node.classList.add("limited"); // 只铺前 3 行，其余展开后显示
+    paintFoot();
+  }
+  head.addEventListener("click", () => {
+    if (!node.classList.contains("limited")) return; // ≤3 个无折叠条：头行仅作展示
+    node.classList.toggle("open");
+    paintFoot();
+  });
+  return node;
+}
+
 /* ---------- 计划 / Todo 卡（PRD 3.7 Plan-first；对齐 Kimi Todo / ZCode 计划展示） ----------
    契约扩展事件演示：{ type:"plan_update", steps:[{text,status:"pending"|"running"|"done"}] }
    契约未扩展前主进程不发送该事件，UI 自然不出现（向后兼容） */

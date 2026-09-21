@@ -5,7 +5,8 @@ export type UiEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "assistant_done" }
-  | { type: "tool_start"; name: string }
+  /** path：写文件类工具（write_file / write_docx 等五个 Office 工具）的目标相对路径，供交付卡定位 */
+  | { type: "tool_start"; name: string; path?: string }
   | { type: "tool_end"; name: string }
   | { type: "notice"; text: string }
   /** 计划上报（update_plan 工具直通，方案 §3）：浮标与工作台进度以此为准（D3：计划进度，非工具步骤） */
@@ -30,8 +31,9 @@ export type UiEvent =
   | { type: "browser_stop" }
   /** 浏览器控制台有新输出（方案 §5）：控制台子面板增量刷新 */
   | { type: "browser_console_append" }
-  /** 交付物登记（非 write_file 链路产物，如浏览器截图存证）：浮层与预览入口即时可用 */
-  | { type: "artifact_added"; path: string }
+  /** 交付物登记（非 write_file 链路产物，如浏览器截图存证 / Office 工具产出）：浮层与预览入口即时可用；
+   *  tool 存在时为 Office 写/编工具（write_docx 等），渲染层会将其纳入当轮交付卡 */
+  | { type: "artifact_added"; path: string; tool?: string }
   /** IM 通道状态（钉钉/飞书长连接）：设置页据此刷新；touchedSessionId 存在时表示有 IM 会话更新需刷侧栏 */
   | { type: "im_channels"; channels: ImChannelInfo[]; touchedSessionId?: string }
   | {

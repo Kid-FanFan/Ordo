@@ -304,6 +304,15 @@ export class AgentHost {
     this.mirrorDirty = true;
   }
 
+  /** 写文件类工具的目标相对路径（tool_start 事件携带，供渲染层交付卡定位；其余工具返回 undefined） */
+  private static DELIVERY_TOOLS = new Set(["write_file", "write_docx", "write_pptx", "edit_docx", "edit_pptx", "edit_xlsx"]);
+
+  private deliveryPathOf(toolName: string, args: any): string | undefined {
+    if (!AgentHost.DELIVERY_TOOLS.has(toolName)) return undefined;
+    const p = args?.path;
+    return p == null || p === "" ? undefined : String(p);
+  }
+
   /** 事件桥 + L1/L2 确认门 + 工具审计挂载（每次 buildHarness 后重挂） */
   private attachHarnessListeners(): void {
     const h = this.harness;
@@ -323,7 +332,9 @@ export class AgentHost {
         this.deps.emit({ type: "assistant_done" });
       }
     });
-    h.events.on("tool_start", (ev: any) => this.deps.emit({ type: "tool_start", name: ev.toolName }));
+    h.events.on("tool_start", (ev: any) =>
+      this.deps.emit({ type: "tool_start", name: ev.toolName, path: this.deliveryPathOf(ev.toolName, ev.args) })
+    );
     h.events.on("tool_end", (ev: any) => {
       this.mirrorDirty = true;
       void this.refreshMirror();
@@ -1442,7 +1453,15 @@ export class AgentHost {
         },
       };
 
-      return [writeDocx, writePptx, editDocx, editPptx, editXlsx];
+      return [writeDocx, writePptx, editDocx, editPptx, editXlsx].map((t) => ({
+        ...t,
+        execute: async (id: string, p: any) => {
+          const r = await t.execute(id, p);
+          // 产出/改动入交付物清单（浮层 + 当轮交付卡）：write_file 由渲染层 tool_end 链路负责，此处只管 Office 五件
+          this.deps.emit({ type: "artifact_added", path: String(p?.path ?? ""), tool: t.name });
+          return r;
+        },
+      }));
     })();
 
     // 浏览器桥 A 工具面（方案 §5）：browser_open 动态分级——跨源/首次 L2（确认卡呈现完整 URL），

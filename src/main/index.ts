@@ -146,17 +146,16 @@ function sendUi(ev: UiEvent | Record<string, unknown>): void {
 }
 
 // ---------- L2 确认模式（三档，前台交互会话专用） ----------
-// 生效口径：会话开始时锁定——首次 L2 到来时按当时的 settings 快照锁定本会话模式；
-// 中途切换只改设置，自下个新会话生效（与 composer 按钮的提示一致）。
+// 生效口径：轮级——run_start（新一条消息）时解除锁定，本轮首次 L2 到来时按当时设置重锁；
+// 即「保存后当前对话的下一条消息起生效」，对话中途不突变（一轮内的模式恒定）。
 // 自动化后台（预授权模型）与 IM（回复确认）有自己的 confirm 语义，不在此模式管辖内。
 const AUTO_EDIT_TOOLS = new Set(["write_file", "write_docx", "write_pptx", "edit_docx", "edit_pptx", "edit_xlsx"]);
-let confirmLockSession: string | null = null;
+let confirmLocked = false;
 let confirmLockedMode: ConfirmMode = "ask";
 
 function fgConfirm(req: ConfirmRequest): Promise<boolean> {
-  const sid = host?.currentSessionId ?? null;
-  if (sid !== confirmLockSession) {
-    confirmLockSession = sid;
+  if (!confirmLocked) {
+    confirmLocked = true;
     confirmLockedMode = normalizeConfirmMode(appSettings?.confirmMode);
   }
   if (confirmLockedMode === "auto" || (confirmLockedMode === "autoEdit" && AUTO_EDIT_TOOLS.has(req.tool))) {
@@ -167,6 +166,7 @@ function fgConfirm(req: ConfirmRequest): Promise<boolean> {
 }
 
 function emit(ev: UiEvent): void {
+  if (ev.type === "run_start") confirmLocked = false; // 轮级生效：新一条消息 = 解除模式锁定，本轮首次 L2 时重读设置
   sendUi(ev);
   if (ev.type === "run_end" && win && !win.isDestroyed() && !win.isFocused()) {
     notify("Ordo · 任务完成", "当前任务已结束，点击查看结果");

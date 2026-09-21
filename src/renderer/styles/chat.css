@@ -331,6 +331,86 @@
 }
 .file-card .f-copy:hover { background: var(--panel-soft); border-color: var(--text-faint); }
 
+/* ---------- 多文件汇总卡（方案 A：≥3 个产出时收拢，铺前 3 行 + 展开全部） ---------- */
+.file-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--panel);
+  overflow: hidden;
+}
+.file-group .fg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+}
+.file-group .fg-head:hover { background: var(--panel-soft); }
+.file-group .fg-head svg:first-child { color: var(--accent); flex: none; }
+.file-group .fg-title { font-weight: 600; white-space: nowrap; }
+.file-group .fg-stat {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.file-group .fg-head .chev { display: none; }
+.file-group.limited .fg-head .chev { display: inline-flex; transition: transform var(--dur); }
+.file-group.limited.open .fg-head .chev { transform: rotate(180deg); }
+.file-group .fg-body { display: flex; flex-direction: column; }
+.file-group.limited .fg-body .file-row:nth-child(n + 4) { display: none; }
+.file-group.limited.open .fg-body .file-row:nth-child(n + 4) { display: flex; }
+.file-group .fg-foot {
+  width: 100%;
+  padding: 8px 14px;
+  font-size: 11.5px;
+  color: var(--text-soft);
+  text-align: center;
+  border-top: 1px solid var(--line);
+}
+.file-group .fg-foot:hover { background: var(--panel-soft); color: var(--text); }
+
+/* 紧凑文件行（汇总卡内）：单行高约 34px，替代整行卡堆叠 */
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+}
+.file-row .f-icon { display: flex; color: var(--accent); flex: none; }
+.file-row .f-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.file-row .f-name { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-row .f-badge {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 9px;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+}
+.file-row .f-actions { display: flex; gap: 6px; flex: none; }
+.file-row .f-copy {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  font-size: 10.5px;
+  color: var(--text-soft);
+  transition: background var(--dur), border-color var(--dur);
+}
+.file-row .f-copy:hover { background: var(--panel-soft); border-color: var(--text-faint); }
+
 /* ---------- 计划 / Todo 卡（契约扩展事件；Kimi Todo / ZCode 计划式） ---------- */
 .plan {
   border: 1px solid var(--line);
