@@ -26,6 +26,7 @@ const sendBtn = $("send-btn");
 const jumpBtn = $("jump-bottom");
 const expertBtn = $("expert-btn");
 const thinkingBtn = $("thinking-btn");
+const confirmModeBtn = $("confirm-mode-btn");
 const sessionList = $("session-list");
 
 const state = {
@@ -5450,6 +5451,7 @@ let openMenuEl = null;
 function closeMenu() {
   expertBtn.classList.remove("open");
   thinkingBtn.classList.remove("open");
+  confirmModeBtn.classList.remove("open");
   if (openMenuEl) {
     openMenuEl.remove();
     openMenuEl = null;
@@ -5515,6 +5517,43 @@ thinkingBtn.addEventListener("click", () => {
   if (!state.thinkingState) return;
   showMenu(thinkingBtn, state.thinkingState.items, state.thinkingState.currentId, (it) => {
     api.switchThinking(it.id).catch(() => {});
+  });
+});
+
+/* ============ 操作确认模式（三档；进行中的会话保持原模式，新会话生效） ============ */
+const CONFIRM_MODES = [
+  { id: "ask", name: "每次确认", desc: "所有敏感操作（写文件 / 执行命令 / 打开网页等）都弹出确认卡" },
+  { id: "autoEdit", name: "自动编辑", desc: "写文件与 Word / PPT / Excel 编辑自动执行；命令、联网、保存技能、连接器仍需确认" },
+  { id: "auto", name: "完全托管", desc: "全部敏感操作自动执行并逐条留审计，不再弹出确认卡" },
+];
+let confirmMode = "ask";
+function paintConfirmModeBtn() {
+  const cur = CONFIRM_MODES.find((m) => m.id === confirmMode);
+  confirmModeBtn.innerHTML = `${icon("shield", 13)}<span>${cur ? cur.name : "每次确认"}</span>${icon("chevDown", 12, "chev")}`;
+  confirmModeBtn.classList.toggle("mode-auto", confirmMode === "auto");
+}
+confirmModeBtn.addEventListener("click", () => {
+  showMenu(confirmModeBtn, CONFIRM_MODES, confirmMode, async (it) => {
+    if (it.id === confirmMode) return;
+    if (
+      it.id === "auto" &&
+      !confirm("完全托管：新会话中 Agent 的所有敏感操作（写文件、执行命令、打开网页、连接器等）将自动执行，不再逐项确认（审计仍逐条留痕）。\n确定切换吗？")
+    ) {
+      return;
+    }
+    const prev = confirmMode;
+    confirmMode = it.id;
+    paintConfirmModeBtn();
+    try {
+      const st = await api.setSettings?.({ confirmMode: it.id });
+      if (st && st.confirmMode) confirmMode = st.confirmMode; // 以主进程归一化结果为准
+    } catch {
+      confirmMode = prev; // 保存失败回滚按钮显示
+    }
+    paintConfirmModeBtn();
+    // 生效口径在主进程（会话开始时锁定）：进行中的会话保持原模式，新会话生效
+    const name = (CONFIRM_MODES.find((m) => m.id === confirmMode) || {}).name || it.name;
+    toast(state.activeSessionId ? `已切换为「${name}」，新会话生效` : `已切换为「${name}」`);
   });
 });
 
@@ -5883,6 +5922,12 @@ export async function boot(mockApi) {
       state.thinkingState.current?.id ?? state.thinkingState.currentId ?? state.thinkingState.items?.[0]?.id;
   }
   paintThinkingBtn();
+
+  // L2 确认模式（composer 按钮）：读本地设置，缺省每次确认
+  void Promise.resolve(api.getSettings?.() ?? {}).then((st) => {
+    if (st && st.confirmMode) confirmMode = st.confirmMode;
+    paintConfirmModeBtn();
+  });
 
   await refreshSessions();
   await loadWorkspaces();

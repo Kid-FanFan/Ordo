@@ -58,7 +58,7 @@ import { ImBridge, type ImHostLike } from "./im-bridge";
 import { checkClientUpdate } from "./update-checker";
 import { officeBuiltinVersion } from "./office-cli";
 import { attachmentBlock, safeAttachmentName, saveAttachments } from "./attachments";
-import { AppSettingsStore, type AppSettings } from "./app-settings";
+import { AppSettingsStore, type AppSettings, type ConfirmMode, normalizeConfirmMode } from "./app-settings";
 import type { UiEvent } from "../shared/protocol";
 
 const SELFTEST = process.env.ORDO_SELFTEST === "1";
@@ -143,6 +143,27 @@ function confirmViaUi(req: ConfirmRequest): Promise<boolean> {
 /** 统一安全转发：主窗口可能已销毁（退出竞态），此时静默丢弃，避免 "Object has been destroyed" 崩主进程 */
 function sendUi(ev: UiEvent | Record<string, unknown>): void {
   if (win && !win.isDestroyed()) win.webContents.send("ordo:event", ev);
+}
+
+// ---------- L2 确认模式（三档，前台交互会话专用） ----------
+// 生效口径：会话开始时锁定——首次 L2 到来时按当时的 settings 快照锁定本会话模式；
+// 中途切换只改设置，自下个新会话生效（与 composer 按钮的提示一致）。
+// 自动化后台（预授权模型）与 IM（回复确认）有自己的 confirm 语义，不在此模式管辖内。
+const AUTO_EDIT_TOOLS = new Set(["write_file", "write_docx", "write_pptx", "edit_docx", "edit_pptx", "edit_xlsx"]);
+let confirmLockSession: string | null = null;
+let confirmLockedMode: ConfirmMode = "ask";
+
+function fgConfirm(req: ConfirmRequest): Promise<boolean> {
+  const sid = host?.currentSessionId ?? null;
+  if (sid !== confirmLockSession) {
+    confirmLockSession = sid;
+    confirmLockedMode = normalizeConfirmMode(appSettings?.confirmMode);
+  }
+  if (confirmLockedMode === "auto" || (confirmLockedMode === "autoEdit" && AUTO_EDIT_TOOLS.has(req.tool))) {
+    req.autoBy = `mode:${confirmLockedMode}`; // l2_confirm 审计记 auto-approved(mode:...)，与手点同意区分
+    return Promise.resolve(true);
+  }
+  return confirmViaUi(req);
 }
 
 function emit(ev: UiEvent): void {
@@ -475,7 +496,7 @@ async function bootstrap(): Promise<void> {
           console.log(`[SELFTEST] 自动同意 L2 操作: ${req.tool} ${req.args?.path ?? ""}`);
           return true;
         }
-      : confirmViaUi,
+      : fgConfirm,
     selfTest: SELFTEST,
     connectors: connectorHost,
     knowledge: knowledgeProvider,
@@ -2751,6 +2772,7 @@ ipcMain.handle("ordo:setSettings", async (_e, patch: unknown) => {
     ...(typeof p.autoStart === "boolean" ? { autoStart: p.autoStart } : {}),
     ...(typeof p.desktopNotify === "boolean" ? { desktopNotify: p.desktopNotify } : {}),
     ...(typeof p.restoreLastSession === "boolean" ? { restoreLastSession: p.restoreLastSession } : {}),
+    ...(p.confirmMode !== undefined ? { confirmMode: normalizeConfirmMode(p.confirmMode) } : {}),
     ...dirPatch,
   });
   if (!SELFTEST) {

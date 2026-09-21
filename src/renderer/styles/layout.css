@@ -1184,8 +1184,7 @@ svg { flex: none; }
   overflow-y: auto;
   overflow-x: hidden;
   position: relative;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
+  /* 滚动条配色由根级继承规则统一（tokens.css html{}），此处不再单列 */
 }
 #thread {
   max-width: 760px;
@@ -1359,6 +1358,8 @@ svg { flex: none; }
 .pill.open .chev { transform: rotate(180deg); }
 .pill.locked { cursor: default; }
 .pill.locked:hover { background: none; color: var(--text-soft); }
+.pill.mode-auto { color: var(--warn); } /* 完全托管：确认姿态变化，警示色点亮 */
+.pill.mode-auto svg { color: var(--warn); }
 #send-btn {
   width: 32px;
   height: 32px;

@@ -37,3 +37,13 @@
   --shadow-m: 0 8px 24px rgba(33, 32, 28, 0.1);
   --dur: 140ms;
 }
+
+/* 滚动条统一跟随主题：scrollbar-width/color 均为可继承属性，根上一处即覆盖全部
+   滚动容器（会话列表/工作台/思考区/市场页/弹窗等，含未来新增）。
+   thumb 取主题中性退让色 --text-faint 的半透明混合——浅色主题为暖灰、暗色主题为
+   浅灰，任何内置/自定义主题下都是"主题派生的中性灰"。原生控件明暗另由 theme.js
+   按各主题 --bg 亮度设置 color-scheme 兜底。 */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-faint) 55%, transparent) transparent;
+}

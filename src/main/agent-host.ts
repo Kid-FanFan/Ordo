@@ -29,6 +29,8 @@ export interface ConfirmRequest {
   id: string;
   tool: string;
   args: Record<string, unknown>;
+  /** 确认层自动放行时的来源标注（如 "mode:autoEdit"）；进 l2_confirm 审计 decision，与用户手点同意区分 */
+  autoBy?: string;
 }
 
 export interface AgentHostDeps {
@@ -1793,7 +1795,13 @@ export class AgentHost {
     this.deps.audit.append({
       event: "l2_confirm",
       tool: toolCall.name,
-      decision: approved ? (this.deps.selfTest ? "auto-approved(selftest)" : "approved") : "denied",
+      decision: approved
+        ? req.autoBy
+          ? `auto-approved(${req.autoBy})`
+          : this.deps.selfTest
+            ? "auto-approved(selftest)"
+            : "approved"
+        : "denied",
     });
     if (!approved) {
       return { block: true, reason: "本人确认拒绝：用户在确认弹窗中选择了取消" };
@@ -1903,6 +1911,9 @@ export class AgentHost {
         wsId: this.deps.workspace.currentWsId,
         wsRoot: this.deps.workspace.root,
       });
+      // 创建即广播：首轮刚开始侧栏就出现会话条目（session_saved 本就每轮幂等重发，
+      // 渲染层处理为"设 id + 设标题 + 刷新"，多一次不影响语义）
+      this.deps.emit({ type: "session_saved", id, title });
     }
     const piSession = await this.deps.sessions.openSessionObject(id);
     if (!piSession) throw new Error(`会话不存在: ${id}`);

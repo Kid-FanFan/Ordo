@@ -87,6 +87,17 @@ export async function loadSavedTheme() {
 
 let iconOverrides = {};
 
+/** 主题底色明暗判定（color-scheme 用）：支持 #rgb/#rrggbb，感知亮度 < 0.5 判暗 */
+function isDarkColor(css) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(css).trim());
+  if (!m) return false;
+  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
+}
+
 export function applyTheme(theme) {
   currentThemeId = theme.id;
   const root = document.documentElement;
@@ -97,6 +108,9 @@ export function applyTheme(theme) {
     for (const [k, v] of Object.entries(theme.colors)) root.style.setProperty(k, v);
   }
   if (theme.font) root.style.setProperty("--sans", theme.font);
+
+  // 原生控件明暗（滚动条兜底等）：按 --bg 亮度自动判定，内置与自定义主题一并覆盖
+  root.style.colorScheme = isDarkColor(theme.colors?.["--bg"] ?? "#f7f6f3") ? "dark" : "light";
 
   // 背景图
   if (theme.background && theme.background.image) {
