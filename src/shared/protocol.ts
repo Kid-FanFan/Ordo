@@ -8,6 +8,8 @@ export type UiEvent =
   /** path：写文件类工具（write_file / write_docx 等五个 Office 工具）的目标相对路径，供交付卡定位 */
   | { type: "tool_start"; name: string; path?: string }
   | { type: "tool_end"; name: string }
+  /** 长任务过程输出增量（run_command v2 流式回传）：渲染层追加进对应工具步骤行 */
+  | { type: "tool_output"; name: string; text: string }
   | { type: "notice"; text: string }
   /** 计划上报（update_plan 工具直通，方案 §3）：浮标与工作台进度以此为准（D3：计划进度，非工具步骤） */
   | { type: "plan_update"; steps: Array<{ text: string; status: "pending" | "running" | "done" }> }

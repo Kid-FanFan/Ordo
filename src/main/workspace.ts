@@ -227,23 +227,35 @@ export class Workspace {
     return ws;
   }
 
-  // 路径围栏：工具只能访问工作区内的路径（骨架版；临时授权/白名单目录后续接入）
+  // 路径围栏：工具只能访问工作区内的路径。
+  // 写围栏 = 工作区 + 本工作区产品域暂存（~/.ordo/workspaces/<id>/tmp，中间产物/溢出输出落这里，
+  // 由 TTL 清理）；读围栏 = 写围栏 + 技能分区（SKILL.md 按需可读）。工作区外路径由会话级授权放行（agent-host grants）。
   resolveInside(rel: string): string {
     const abs = path.resolve(this.root, rel);
-    if (abs !== this.root && !abs.startsWith(this.root + path.sep)) {
+    if (!this.isInWriteFence(abs)) {
       throw new Error(`路径超出工作区范围（骨架版仅允许工作区内路径）: ${rel}`);
     }
     return abs;
   }
 
-  // 只读资源围栏：工作区 + 技能分区可读（Pi 技能机制会在模型按需读取 SKILL.md 全文），
-  // 但写操作仍走 resolveInside，技能目录只读
+  // 可写围栏判定（工作区 + 产品域暂存根）
+  isInWriteFence(abs: string): boolean {
+    const tmp = this.tempRoot;
+    return abs === this.root || abs.startsWith(this.root + path.sep) || abs === tmp || abs.startsWith(tmp + path.sep);
+  }
+
+  // 只读资源围栏：写围栏 + 技能分区；绝对路径原样判定（附件引用/外部授权路径走 grants，不在此层）
   resolveReadable(rel: string): string {
     const abs = path.resolve(this.root, rel);
-    const roots = [this.root, this.dirs.skillsPersonal, this.dirs.skillsEnterprise];
+    const roots = [this.root, this.tempRoot, this.dirs.skillsPersonal, this.dirs.skillsEnterprise];
     for (const r of roots) {
       if (abs === r || abs.startsWith(r + path.sep)) return abs;
     }
     throw new Error(`路径超出可读范围（工作区与技能目录）: ${rel}`);
+  }
+
+  // 产品域暂存根（按工作区隔离）：中间产物 / 上传字节落盘 / 命令溢出输出。启动时按 TTL 清理（sweepTemp）
+  get tempRoot(): string {
+    return path.join(this.dirs.home, "workspaces", this.currentWsId, "tmp");
   }
 }

@@ -118,6 +118,25 @@
   color: var(--text-soft);
 }
 .tool-row.l2 { box-shadow: inset 3px 0 0 var(--warn); }
+/* 过程输出（run_command v2 流式）：执行中常显尾部，完成后折叠单行、点击展开 */
+.tool-row.has-output { flex-wrap: wrap; cursor: pointer; }
+.tool-row .t-output {
+  flex-basis: 100%;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--panel-soft);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tool-row.has-output:not(.output-open) .t-output { display: none; }
+.tool-row.has-output.output-open .t-output { display: block; max-height: 320px; }
 .tool-row .t-icon { color: var(--text-faint); display: flex; }
 .tool-row .t-name { flex: none; font-weight: 500; color: var(--text); }
 .tool-row .t-target {

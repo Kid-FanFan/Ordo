@@ -114,6 +114,8 @@ export function createToolRow(name, args, l2, preDone = false) {
   const summary = argSummary(args);
   target.textContent = summary;
   target.title = summary;
+  // 过程输出（run_command 等长任务流式回传）：尾部 2000 字符，完成前常显、完成后收进行内可点开
+  let outEl = null;
   const row = {
     node,
     meta,
@@ -122,6 +124,17 @@ export function createToolRow(name, args, l2, preDone = false) {
     startTs: Date.now(),
     rejected: false,
     confirmPath: null,
+    targetPath: null,
+    appendOutput(text) {
+      if (!text) return;
+      if (!outEl) {
+        outEl = el("div", "t-output");
+        node.appendChild(outEl);
+      }
+      const cur = (outEl.textContent || "") + text;
+      outEl.textContent = cur.length > 2000 ? "…\n" + cur.slice(-2000) : cur;
+      outEl.scrollTop = outEl.scrollHeight;
+    },
     end(rejected) {
       if (this.status !== "running") return;
       this.status = rejected ? "rejected" : "done";
@@ -130,8 +143,14 @@ export function createToolRow(name, args, l2, preDone = false) {
       node.classList.add(rejected ? "rejected" : "done");
       node.querySelector(".t-status").innerHTML = icon(rejected ? "x" : "check", 13);
       node.querySelector(".t-dur").textContent = rejected ? "" : durText(this.dur);
+      if (outEl) node.classList.add("has-output"); // 完成后折叠为单行，点击展开
     },
   };
+  node.addEventListener("click", (e) => {
+    if (!node.classList.contains("has-output")) return;
+    if (e.target.closest(".t-output")) return;
+    node.classList.toggle("output-open");
+  });
   return row;
 }
 

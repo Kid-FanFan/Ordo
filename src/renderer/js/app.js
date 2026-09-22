@@ -365,9 +365,9 @@ function handleEvent(ev) {
       // 捕获最终回答原文（消息操作条用）：assistant_done 先于 run_end，run_end 时 textBlock 已关闭
       state.lastAnswerRaw = state.textBlock ? state.textBlock.raw : "";
       // 文件交付卡：write_file / Office 五件成功后展示成果物。
-      // 单槽改回合级集合：并行多写不再丢卡（原 pendingFile 只留第一个）；≥3 个收成汇总卡（方案 A）
+      // 交付卡资格三关（v6 定稿）：非内部路径（点目录=过程件）+ 最终回答里被提到（引用即交付）+ 去重；≥3 个收汇总卡
       if (state.pendingFiles.length) {
-        const uniqPaths = [...new Set(state.pendingFiles.map(String))];
+        const uniqPaths = [...new Set(state.pendingFiles.map(String))].filter((p) => !isInternalPath(p) && mentionsFile(state.lastAnswerRaw, p));
         for (const p of uniqPaths) registerArtifact(p);
         const cards =
           uniqPaths.length >= 3
@@ -402,11 +402,21 @@ function handleEvent(ev) {
       const row = state.runningRows.filter((r) => r.status === "running").pop();
       if (row) {
         row.end(row.rejected);
-        // 写文件成功 → 待渲染交付卡（路径来自 tool_start 转发，确认卡参数兜底；被拒绝则不渲染）
+        // 写文件成功 → 待渲染交付卡（路径来自 tool_start 转发，确认卡参数兜底；被拒绝/内部路径不渲染）
         if (row.name === "write_file" && !row.rejected) {
           const p = row.targetPath || row.confirmPath;
-          if (p) state.pendingFiles.push(String(p));
+          if (p && !isInternalPath(p)) state.pendingFiles.push(String(p));
         }
+      }
+      break;
+    }
+
+    case "tool_output": {
+      // 长任务过程输出增量（run_command v2）：追加进最近一条同名运行中步骤行
+      const row = [...state.runningRows].reverse().find((r) => r.name === ev.name && r.status === "running");
+      if (row) {
+        row.appendOutput(ev.text || "");
+        scrollBottom();
       }
       break;
     }
@@ -466,9 +476,9 @@ function handleEvent(ev) {
       break;
 
     case "artifact_added":
-      // 交付物登记：浏览器截图等只进浮层清单；Office 五件（带 tool 标记）同时进当轮交付卡
+      // 交付物登记：内部路径（点目录/暂存）与浏览器截图只进浮层清单；Office 五件（带 tool 标记）同时进当轮交付卡
       registerArtifact(ev.path, true);
-      if (ev.tool) state.pendingFiles.push(String(ev.path));
+      if (ev.tool && !isInternalPath(ev.path)) state.pendingFiles.push(String(ev.path));
       break;
 
     case "confirm_request": {
@@ -559,8 +569,8 @@ function handleEvent(ev) {
       refreshSessions();
       break;
 
-    case "session_loaded":
-      renderHistory(ev.messages || []);
+    case "session_loaded": {
+      // 先刷新会话态，回放延后一拍：等存在性预取（历史卡只画还存在的交付文件，v6）；序号防快速切换乱序
       state.activeSessionId = ev.id;
       state.answerVersions = []; // 版本表为会话内内存态：加载/切换会话即重置（回放只显示最终版本）
       state.answerIdx = 0;
@@ -571,7 +581,6 @@ function handleEvent(ev) {
       state.bubble.ranOnce = false;
       state.userBubbleShown = false; // 历史回放已含用户气泡（renderHistory 画）；下一回合重新判定
       refreshBubble();
-      state.activeSessionId = ev.id;
       setSessionTitle(ev.title);
       lockWs(); // 历史会话已锚定
       refreshSessions();
@@ -579,7 +588,17 @@ function handleEvent(ev) {
         state.experts.currentId = ev.expert;
         paintExpertBtn();
       }
+      const msgs = ev.messages || [];
+      const seq = ++historyRenderSeq;
+      Promise.resolve(api.filesExist?.(collectDeliveryPaths(msgs)))
+        .then((map) => {
+          if (seq === historyRenderSeq) renderHistory(msgs, map || null);
+        })
+        .catch(() => {
+          if (seq === historyRenderSeq) renderHistory(msgs, null);
+        });
       break;
+    }
 
     case "context_compacted":
       append(createCompaction(ev));
@@ -630,7 +649,9 @@ function textOf(m) {
   return (c || []).filter((x) => x && x.type === "text").map((x) => x.text || "").join("");
 }
 
-function renderHistory(messages) {
+let historyRenderSeq = 0; // 回放序号：存在性预取是异步，快速切换会话时旧回放不得覆盖新回放
+
+function renderHistory(messages, existMap = null) {
   state.artifacts.clear();
   state.wb.preview = null;
   thread.querySelectorAll(".turn").forEach((n) => n.remove());
@@ -675,10 +696,14 @@ function renderHistory(messages) {
       flushFold();
       ensureTurn().appendChild(createCompaction({ messagesBefore: m.messagesBefore, messagesAfter: m.messagesAfter, tokensBefore: m.tokensBefore, summary: m.summary || m.text || "" }));
     } else if (m.role === "assistant") {
-      // 写文件类工具（write_file + Office 五件）的产出/改动：与实况回合同一口径出交付卡
-      const written = (m.content || [])
-        .filter((c) => c && c.type === "toolCall" && DELIVERY_TOOLS.has(c.name) && c.arguments?.path)
-        .map((c) => String(c.arguments.path));
+      // 交付卡资格三关（与实况回合同口径）：非内部路径 + 本条消息正文提到 + 文件仍在原位（存在性预取）
+      const textAll = (m.content || [])
+        .filter((c) => c && c.type === "text")
+        .map((c) => c.text || "")
+        .join("\n");
+      const written = writtenPathsOf(m).filter(
+        (p) => !isInternalPath(p) && mentionsFile(textAll, p) && (!existMap || existMap[p] !== false)
+      );
       for (const c of m.content || []) {
         if (c.type === "thinking") {
           demoteAnswer();
@@ -801,11 +826,15 @@ async function send(preset) {
   state.answerVersions = []; // 新用户消息 = 新问答：版本表重置
   state.answerIdx = 0;
   state.answerNode = null;
-  // 附件先转 base64（读取失败保留输入与附件原样，不丢用户内容）
+  // 附件引用化（v6）：磁盘文件取原始路径零副本引用（webUtils）；无路径输入（粘贴截图等）才转 base64 落暂存
   let atts = [];
   if (attachments.length) {
     try {
-      for (const a of attachments) atts.push({ name: a.name, size: a.size, dataBase64: await fileToBase64(a.file) });
+      for (const a of attachments) {
+        const p = api.pathForFile ? api.pathForFile(a.file) : "";
+        if (p) atts.push({ name: a.name, size: a.size, path: p });
+        else atts.push({ name: a.name, size: a.size, dataBase64: await fileToBase64(a.file) });
+      }
     } catch (e) {
       toast(String((e && e.message) || e));
       return;
@@ -1931,7 +1960,9 @@ async function renderPptxPreview(body, bytes) {
   }
 }
 function registerArtifact(_path, _quiet) {
-  // 交付物入口归浮标浮层（方案 D4）：只登记，不自动展开面板、不再有角标
+  // 交付物入口归浮标浮层（方案 D4）：只登记，不自动展开面板、不再有角标。
+  // 内部路径（点目录/暂存区）= 过程件，不进交付物清单（v6：清单只留可交付的）
+  if (isInternalPath(_path)) return;
   const name = String(_path).split(/[\\/]/).pop();
   state.artifacts.set(String(_path), { name });
   if (bubblePop) renderBubblePop(); // 浮层开着时同步清单
@@ -5536,6 +5567,24 @@ thinkingBtn.addEventListener("click", () => {
 
 /* ============ 操作确认模式（三档；保存后当前对话的下一条消息起生效） ============ */
 const DELIVERY_TOOLS = new Set(["write_file", "write_docx", "write_pptx", "edit_docx", "edit_pptx", "edit_xlsx"]);
+// 交付卡资格（v6 定稿）：只展示"交付给用户的文件"——本轮写入 + 非内部路径 + 最终回答里被提到；历史还需文件仍在原位
+function isInternalPath(p) {
+  return String(p).split(/[\\/]/).some((seg) => seg.startsWith("."));
+}
+function mentionsFile(text, p) {
+  const name = String(p).split(/[\\/]/).pop() || "";
+  return !!name && String(text || "").includes(name);
+}
+function writtenPathsOf(m) {
+  return (m.content || [])
+    .filter((c) => c && c.type === "toolCall" && DELIVERY_TOOLS.has(c.name) && c.arguments?.path)
+    .map((c) => String(c.arguments.path));
+}
+function collectDeliveryPaths(messages) {
+  const out = [];
+  for (const m of messages || []) if (m?.role === "assistant") out.push(...writtenPathsOf(m));
+  return [...new Set(out.map(String))];
+}
 const CONFIRM_MODES = [
   { id: "ask", name: "每次确认", desc: "所有敏感操作（写文件 / 执行命令 / 打开网页等）都弹出确认卡" },
   { id: "autoEdit", name: "自动编辑", desc: "写文件与 Word / PPT / Excel 编辑自动执行；命令、联网、保存技能、连接器仍需确认" },

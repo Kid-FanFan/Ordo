@@ -1,8 +1,17 @@
 // preload：类型化 IPC 桥（contextIsolation 开启，渲染进程只能经 window.ordo 访问）
 // 契约基线（锁定）+ 契约扩展（前端以 ?. 降级调用）：文件预览 / 工作区 / 会话管理 / 技能市场 / 模型 / 停止
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("ordo", {
+  // ---- 基线契约（锁定） ----
+  /** 拖拽/选择文件的原始绝对路径（输入引用 v6：附件零副本，仅引用） */
+  pathForFile: (file: File) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
+  },
   // ---- 基线契约（锁定） ----
   prompt: (text: string, attachments?: Array<{ name: string; size?: number; dataBase64: string }>) =>
     ipcRenderer.invoke("ordo:prompt", text, attachments),
@@ -60,6 +69,8 @@ contextBridge.exposeInMainWorld("ordo", {
   // 文件定位（资源管理器/Finder）与系统默认程序打开（跨平台 shell API）
   revealFile: (relPath: string) => ipcRenderer.invoke("ordo:revealFile", relPath),
   openPath: (relPath: string) => ipcRenderer.invoke("ordo:openPath", relPath),
+  // 历史交付卡存在性批量检查（v6：已消失文件不渲染）
+  filesExist: (paths: string[]) => ipcRenderer.invoke("ordo:filesExist", paths),
   // 用户侧编辑保存（md/txt/csv 文本 + xlsx 值回写；显式动作，审计 user_edit）
   saveFileEdit: (relPath: string, payload: { text: string } | { base64: string }) =>
     ipcRenderer.invoke("ordo:saveFileEdit", relPath, payload),

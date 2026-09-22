@@ -7,7 +7,7 @@ import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { attachmentBlock, saveAttachments } from "./attachments";
+import { attachmentBlock, resolveInputReferences, type AttachmentInput } from "./attachments";
 import { ocrImage as ocrImageFile } from "./ocr";
 import type { UiEvent } from "../shared/protocol";
 import type { Workspace } from "./workspace";
@@ -22,6 +22,7 @@ import { PiSessionStore, replayEntries, type StoredSession, type SessionMeta } f
 import { MemorySystem, type MemoryConfig } from "./memory";
 import { createSearchMemoryToolDefinition, shouldEnableSearchMemory, executeSearchMemory } from "./memory/tool";
 import { MemoryConfigStore } from "./memory/config-store";
+import { extractExternalPaths, referencesPathOutsideFence } from "./external-paths";
 
 const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
 
@@ -83,8 +84,9 @@ interface AppConfig {
   basePrompt: string;
   experts: { defaultId: string; items: ExpertDef[] };
   compaction?: CompactionConfig;
-  /** agent 命令执行（方案 C 自研）：只读白名单 L1 自动执行，其余 L2 确认；管理端可下发收敛 */
-  shell?: { enabled?: boolean; readOnlyCommands?: string[]; defaultTimeoutSec?: number };
+  /** agent 命令执行（方案 C 自研）：只读白名单 L1 自动执行，其余 L2 确认；管理端可下发收敛。
+   *  跨平台（v6）：readOnlyCommands=Windows/PowerShell 清单；readOnlyCommandsPosix=macOS/Linux/bash 清单 */
+  shell?: { enabled?: boolean; readOnlyCommands?: string[]; readOnlyCommandsPosix?: string[]; defaultTimeoutSec?: number };
 }
 
 export class AgentHost {
@@ -553,6 +555,7 @@ export class AgentHost {
   /** 引导：插入当前任务——当前步骤的工具全部完成后、下一轮 LLM 调用前注入（不打断、不取消工具） */
   async steerMessage(text: string): Promise<string> {
     if (!this.lane || !this.running) throw new Error("当前没有运行中的任务，直接发送即可");
+    this.grantExternalPaths(text); // 引导消息里提及的外部路径同样授权（提及即同意）
     const full = this.expandSkillRefs(text);
     const r = await this.lane.steer(full, undefined, this.piCtx);
     if (r.ok !== true || !r.value?.entryId) {
@@ -567,6 +570,7 @@ export class AgentHost {
   /** 排队：当前任务自然结束后追加执行（one-at-a-time：每轮消费最旧一条） */
   async queueFollowUp(text: string): Promise<string> {
     if (!this.lane || !this.running) throw new Error("当前没有运行中的任务，直接发送即可");
+    this.grantExternalPaths(text); // 排队消息里提及的外部路径同样授权
     const full = this.expandSkillRefs(text);
     const r = await this.lane.followUp(full, undefined, this.piCtx);
     if (r.ok !== true || !r.value?.entryId) {
@@ -1141,10 +1145,10 @@ export class AgentHost {
       name: "read_file",
       label: "读取文件",
       level: "L1",
-      description: "读取工作区内文件内容。L1 操作，自动执行。",
-      parameters: Type.Object({ path: Type.String({ description: "相对工作区的路径" }) }),
+      description: "读取文件内容：工作区内路径，或用户消息中提及的已授权路径。L1 操作，自动执行。",
+      parameters: Type.Object({ path: Type.String({ description: "相对工作区的路径，或用户提及的绝对路径" }) }),
       execute: async (_id: string, params: any) => {
-        const abs = ws.resolveReadable(params.path); // 读：工作区 + 技能目录（SKILL.md 按需可读）
+        const abs = this.resolveReadableFor(params.path); // 读：工作区 + 暂存 + 技能目录 + 会话授权
         const text = await fsp.readFile(abs, "utf-8");
         return { content: [{ type: "text", text }], details: { path: params.path } };
       },
@@ -1158,9 +1162,9 @@ export class AgentHost {
       level: "L1",
       description:
         "提取图片中的文字内容（OCR）。适用于文档/表格/字幕类截图；不能理解图像语义（图表含义、照片场景无法分析）。L1 操作，自动执行。",
-      parameters: Type.Object({ path: Type.String({ description: "相对工作区的图片路径（png/jpg/webp/gif/bmp）" }) }),
+      parameters: Type.Object({ path: Type.String({ description: "相对工作区的图片路径（png/jpg/webp/gif/bmp），或用户提及的绝对路径" }) }),
       execute: async (_id: string, params: any) => {
-        const abs = ws.resolveReadable(params.path);
+        const abs = this.resolveReadableFor(params.path);
         try {
           const text = await ocrImageFile(abs);
           return {
@@ -1178,13 +1182,13 @@ export class AgentHost {
       name: "write_file",
       label: "写入文件",
       level: "L2",
-      description: "向工作区写入文件。L2 操作，需本人确认。",
+      description: "写入文件：工作区内（相对路径）或用户明确指定的已授权目录（绝对路径）。L2 操作，需本人确认。",
       parameters: Type.Object({
-        path: Type.String({ description: "相对工作区的路径" }),
+        path: Type.String({ description: "相对工作区的路径，或用户指定的绝对路径" }),
         content: Type.String({ description: "写入内容" }),
       }),
       execute: async (_id: string, params: any) => {
-        const abs = ws.resolveInside(params.path);
+        const abs = this.resolveWriteTarget(params.path);
         await fsp.mkdir(path.dirname(abs), { recursive: true });
         await fsp.writeFile(abs, params.content, "utf-8");
         return { content: [{ type: "text", text: `已写入 ${params.path}` }], details: { path: params.path } };
@@ -1220,7 +1224,7 @@ export class AgentHost {
         const rel = String(p?.path ?? "").trim();
         if (!rel) throw new Error("缺少 path 参数");
         if (!officeAvailable()) throw new Error("OfficeCLI 引擎不可用（二进制缺失，无法处理 Office 文档）");
-        return ws.resolveInside(rel); // 围栏：仅工作区内（与 write_file 一致）
+        return this.resolveWriteTarget(rel); // 写围栏：工作区/暂存 + 用户指定目录授权（与 write_file 一致）
       };
       const capCount = (n: number, what: string) => {
         if (!Number.isFinite(n) || n < 1) throw new Error(`${what} 不能为空`);
@@ -1548,80 +1552,146 @@ export class AgentHost {
       extraTools.push(bOpen, bSnapshot, bClick, bType, bExtract, bShot, bConsole);
     }
 
-    // 命令执行（方案 C 自研，pi 原生 bash 未采用）：只读白名单 L1 自动执行；
-    // 其余（含链式/管道/子表达式）L2，确认卡显示完整命令。一次性执行、超时终止、输出截断回传
+    // 命令执行 v2（方案 C 自研内核 + pi bash 的执行体验）：跨平台 shell——Windows 用 PowerShell（系统自带），
+    // macOS/Linux 用 bash（/bin/bash 缺失退 sh，同 pi 的发现顺序）；只读白名单 L1 自动执行（按平台分清单）；
+    // 引用工作区外路径的命令一律 L2（堵白名单侧门）；支持 cwd 子目录（限写围栏内）；输出流式回传，
+    // 超限溢出落暂存（路径回传模型可读）；超时默认 300s 可放宽到 600s，超时按进程树终止。
     const shellCfg = this.cfg.shell ?? {};
     if (shellCfg.enabled !== false) {
-      const DEFAULT_READ_ONLY = [
-        "dir", "get-childitem", "get-content", "get-item", "get-location",
-        "tree", "type", "get-date", "whoami", "findstr", "where", "select-string",
-      ];
-      const readOnlySet = new Set((shellCfg.readOnlyCommands ?? DEFAULT_READ_ONLY).map((x) => String(x).toLowerCase()));
-      const isReadOnlyCommand = (raw: unknown): boolean => {
-        const cmd = String(raw ?? "").trim();
-        if (!cmd) return false;
-        if (/[\n;|&`]|\$\(/.test(cmd)) return false; // 链式/管道/子表达式：白名单语义失效，一律按 L2
-        const head = (cmd.split(/\s+/)[0] || "").replace(/\.exe$/i, "").split(/[\\/]/).pop() || "";
-        return readOnlySet.has(head.toLowerCase());
-      };
-      const runCommand = {
-        name: "run_command",
-        label: "执行命令",
-        description:
-          "执行一条 PowerShell 命令（一次性子进程，工作目录为工作区根，无交互）。查目录/读文本/搜字符串等只读命令免确认自动执行；其余命令需本人确认。输出超限截断，超时自动终止。",
-        parameters: Type.Object({
-          command: Type.String({ description: "完整命令（单条，不带链式分隔符）" }),
-          timeout: Type.Optional(Type.Number({ description: "超时秒数（1~300，默认 60）" })),
-        }),
-        // 分级按命令动态判定（beforeToolCall 经 levelOf 调用）
-        levelFor: (args: any) => (isReadOnlyCommand(args?.command) ? "L1" : "L2"),
-        get level(): "L1" | "L2" {
-          return "L2";
-        },
-        execute: async (_id: string, params: any) => {
-          const cmd = String(params.command ?? "");
-          const timeoutSec = Math.min(Math.max(Number(params.timeout) || (shellCfg.defaultTimeoutSec ?? 60), 1), 300);
-          const started = Date.now();
-          const res = await new Promise<{ out: string; err: string; code: number | null; timedOut: boolean }>((resolve) => {
-            const child = spawn("powershell.exe", ["-NoProfile", "-Command", cmd], { cwd: ws.root, windowsHide: true });
-            let out = "";
-            let err = "";
-            let timedOut = false;
-            const timer = setTimeout(() => {
-              timedOut = true;
-              child.kill();
-            }, timeoutSec * 1000);
-            child.stdout?.on("data", (d) => {
-              if (out.length < 200000) out += d.toString();
-            });
-            child.stderr?.on("data", (d) => {
-              if (err.length < 50000) err += d.toString();
-            });
-            child.on("error", (e) => {
-              clearTimeout(timer);
-              resolve({ out, err: err + String(e.message), code: -1, timedOut });
-            });
-            child.on("close", (code) => {
-              clearTimeout(timer);
-              resolve({ out, err, code, timedOut });
-            });
+    const IS_WIN = process.platform === "win32";
+    const POSIX_SHELL = IS_WIN ? "" : fsSync.existsSync("/bin/bash") ? "/bin/bash" : "sh";
+    const DEFAULT_READ_ONLY_WIN = [
+      "dir", "get-childitem", "get-content", "get-item", "get-location",
+      "tree", "type", "get-date", "whoami", "findstr", "where", "select-string",
+    ];
+    const DEFAULT_READ_ONLY_POSIX = [
+      "ls", "cat", "head", "tail", "grep", "pwd", "whoami", "date", "wc",
+      "file", "du", "df", "which", "stat", "sort", "uniq", "diff", "ps",
+    ];
+    const readOnlySet = new Set(
+      ((IS_WIN ? shellCfg.readOnlyCommands : shellCfg.readOnlyCommandsPosix) ??
+        (IS_WIN ? DEFAULT_READ_ONLY_WIN : DEFAULT_READ_ONLY_POSIX)).map((x) => String(x).toLowerCase())
+    );
+    const isReadOnlyCommand = (raw: unknown): boolean => {
+      const cmd = String(raw ?? "").trim();
+      if (!cmd) return false;
+      if (/[\n;|&`]|\$\(/.test(cmd)) return false; // 链式/管道/子表达式：白名单语义失效，一律按 L2
+      const head = (cmd.split(/\s+/)[0] || "").replace(/\.exe$/i, "").split(/[\\/]/).pop() || "";
+      return readOnlySet.has(head.toLowerCase());
+    };
+    const runCommand = {
+      name: "run_command",
+      label: "执行命令",
+      description: IS_WIN
+        ? "执行一条 PowerShell 命令（一次性子进程，默认工作目录为工作区根，无交互）。查目录/读文本/搜字符串等只读命令免确认自动执行；其余命令需本人确认。可用 cwd 指定工作区内子目录。输出实时回传，超限溢出存档（路径回传可读），超时自动终止。"
+        : "执行一条 bash 命令（一次性子进程，默认工作目录为工作区根，无交互）。查目录/读文本/搜字符串等只读命令免确认自动执行；其余命令需本人确认。可用 cwd 指定工作区内子目录。输出实时回传，超限溢出存档（路径回传可读），超时自动终止。",
+      parameters: Type.Object({
+        command: Type.String({ description: "完整命令（单条，不带链式分隔符）" }),
+        cwd: Type.Optional(Type.String({ description: "工作目录（相对工作区或工作区内绝对路径）；启动服务/构建等子目录任务用" })),
+        timeout: Type.Optional(Type.Number({ description: "超时秒数（1~600，默认 300）" })),
+      }),
+      // 分级按命令动态判定（beforeToolCall 经 levelOf 调用）：引用外部路径 → 一律 L2
+      levelFor: (args: any) => {
+        const cmd = String(args?.command ?? "");
+        if (referencesPathOutsideFence(cmd, [ws.root, ws.tempRoot], this.externalGrants.keys())) return "L2";
+        return isReadOnlyCommand(cmd) ? "L1" : "L2";
+      },
+      get level(): "L1" | "L2" {
+        return "L2";
+      },
+      execute: async (_id: string, params: any) => {
+        const cmd = String(params.command ?? "");
+        const timeoutSec = Math.min(Math.max(Number(params.timeout) || (shellCfg.defaultTimeoutSec ?? 300), 1), 600);
+        let absCwd = ws.root;
+        if (params.cwd != null && String(params.cwd).trim()) {
+          absCwd = ws.resolveInside(String(params.cwd));
+          if (!fsSync.existsSync(absCwd) || !fsSync.statSync(absCwd).isDirectory()) throw new Error(`cwd 不是有效目录：${params.cwd}`);
+        }
+        const started = Date.now();
+        const res = await new Promise<{ out: string; err: string; code: number | null; timedOut: boolean }>((resolve) => {
+          const child = IS_WIN
+            ? spawn("powershell.exe", ["-NoProfile", "-Command", cmd], { cwd: absCwd, windowsHide: true })
+            : spawn(POSIX_SHELL, ["-c", cmd], { cwd: absCwd, detached: true }); // detached：进程组终止（npm 等子进程树）
+          let out = "";
+          let err = "";
+          let timedOut = false;
+          const timer = setTimeout(() => {
+            timedOut = true;
+            try {
+              if (IS_WIN) spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true });
+              else process.kill(-child.pid!, "SIGKILL");
+            } catch {
+              child.kill("SIGKILL");
+            }
+          }, timeoutSec * 1000);
+          // 流式回传：增量节流推送（600ms 窗口），对话流实时可见
+          let pending = "";
+          let lastFlush = 0;
+          const flush = (force = false) => {
+            if (!pending) return;
+            const now = Date.now();
+            if (!force && now - lastFlush < 600) return;
+            this.deps.emit({ type: "tool_output", name: "run_command", text: pending });
+            pending = "";
+            lastFlush = now;
+          };
+          child.stdout?.on("data", (d) => {
+            if (out.length < 200000) out += d.toString();
+            pending += d.toString();
+            flush();
           });
-          const ms = Date.now() - started;
-          const clip = (t: string, n: number) => (t.length > n ? `…（输出超限，仅保留末尾 ${n} 字符）\n` + t.slice(-n) : t);
-          const text = [
-            res.timedOut ? `命令超时（${timeoutSec}s），已强制终止。已捕获输出：` : `退出码 ${res.code ?? "?"} · ${ms}ms`,
-            res.out ? clip(res.out, 8000) : "",
-            res.err ? `[stderr]\n${clip(res.err, 2000)}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n");
-          this.deps.audit.append({
-            event: "run_command",
-            command: cmd.slice(0, 500),
-            level: isReadOnlyCommand(cmd) ? "L1" : "L2",
-            exitCode: res.code,
-            timedOut: res.timedOut,
-            ms,
+          child.stderr?.on("data", (d) => {
+            if (err.length < 50000) err += d.toString();
+            pending += d.toString();
+            flush();
+          });
+          const flushTimer = setInterval(() => flush(true), 600);
+          child.on("error", (e) => {
+            clearTimeout(timer);
+            clearInterval(flushTimer);
+            flush(true);
+            resolve({ out, err: err + String(e.message), code: -1, timedOut });
+          });
+          child.on("close", (code) => {
+            clearTimeout(timer);
+            clearInterval(flushTimer);
+            flush(true);
+            resolve({ out, err, code, timedOut });
+          });
+        });
+        const ms = Date.now() - started;
+        // 溢出落盘：完整输出进产品域暂存（路径回传，模型可用 read_file 自取），对话流保留尾部
+        let spillNote = "";
+        const full = res.out + (res.err ? `\n[stderr]\n${res.err}` : "");
+        if (full.length > 16000) {
+          try {
+            const spillDir = path.join(ws.tempRoot, "spill");
+            await fsp.mkdir(spillDir, { recursive: true });
+            const spillPath = path.join(spillDir, `cmd-${Date.now()}.txt`);
+            await fsp.writeFile(spillPath, full, "utf-8");
+            spillNote = `\n（完整输出已存档：${spillPath}）`;
+          } catch {
+            /* 落盘失败仅省略提示 */
+          }
+        }
+        const clip = (t: string, n: number) => (t.length > n ? `…（输出超限，仅保留末尾 ${n} 字符）\n` + t.slice(-n) : t);
+        const text = [
+          res.timedOut ? `命令超时（${timeoutSec}s），已强制终止（进程树）。已捕获输出：` : `退出码 ${res.code ?? "?"} · ${ms}ms`,
+          res.out ? clip(res.out, 8000) : "",
+          res.err ? `[stderr]\n${clip(res.err, 2000)}` : "",
+          spillNote,
+        ]
+          .filter(Boolean)
+          .join("\n");
+        this.deps.audit.append({
+          event: "run_command",
+          command: cmd.slice(0, 500),
+          level: this.levelOf("run_command", params),
+          shell: IS_WIN ? "powershell" : POSIX_SHELL,
+          cwd: absCwd,
+          exitCode: res.code,
+          timedOut: res.timedOut,
+          ms,
           });
           return { content: [{ type: "text", text: text || "（无输出）" }], details: { command: cmd, exitCode: res.code, timedOut: res.timedOut } };
         },
@@ -1800,6 +1870,63 @@ export class AgentHost {
     }
   }
 
+  // ---------- 会话级外部路径授权（v6 提及即同意） ----------
+  // 用户消息中给出的真实存在路径 = 输入引用：read=该文件可读；writeDir=该目录可写（含其下可读）。
+  // 会话级：newSession/loadSession 清零；每次首次登记审计 external_read_grant。
+  private externalGrants = new Map<string, "read" | "writeDir">();
+  private grantedAudited = new Set<string>();
+
+  private grantExternalPaths(text: string): void {
+    for (const hit of extractExternalPaths(text)) {
+      const prev = this.externalGrants.get(hit.abs);
+      if (prev === hit.kind) continue;
+      this.externalGrants.set(hit.abs, hit.kind);
+      if (!this.grantedAudited.has(hit.abs)) {
+        this.grantedAudited.add(hit.abs);
+        this.deps.audit.append({ event: "external_read_grant", path: hit.abs, kind: hit.kind, source: "user-mention" });
+      }
+    }
+  }
+
+  private clearGrants(): void {
+    this.externalGrants.clear();
+    this.grantedAudited.clear();
+  }
+
+  private grantAllowsRead(abs: string): boolean {
+    const p = path.resolve(abs);
+    for (const [g, kind] of this.externalGrants) {
+      if (g === p) return true;
+      if (kind === "writeDir" && p.startsWith(g + path.sep)) return true;
+    }
+    return false;
+  }
+
+  private grantAllowsWriteUnder(abs: string): boolean {
+    const p = path.resolve(abs);
+    for (const [g, kind] of this.externalGrants) {
+      if (kind === "writeDir" && (p === g || p.startsWith(g + path.sep))) return true;
+    }
+    return false;
+  }
+
+  // 读路径统一入口：绝对路径走授权判定；相对路径按工作区根解析后走围栏（工作区/暂存/技能）
+  private resolveReadableFor(relOrAbs: string): string {
+    const raw = String(relOrAbs);
+    const abs = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(this.deps.workspace.root, raw);
+    if (this.grantAllowsRead(abs)) return abs;
+    return this.deps.workspace.resolveReadable(raw);
+  }
+
+  // 写路径统一入口：写围栏（工作区+暂存）或用户指定目录授权；两者皆否 → 明确告知模型如何获得授权
+  private resolveWriteTarget(relOrAbs: string): string {
+    const raw = String(relOrAbs);
+    const abs = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(this.deps.workspace.root, raw);
+    if (this.deps.workspace.isInWriteFence(abs)) return abs;
+    if (this.grantAllowsWriteUnder(abs)) return abs;
+    throw new Error("路径在工作区外且未获授权：请用户在消息中明确给出该目标路径（或其所在目录）后重试，也可先将产出保存到工作区");
+  }
+
   private async beforeToolCall(toolCall: any, args: any): Promise<{ block: boolean; reason: string } | undefined> {
     const level = this.levelOf(toolCall.name, args);
     // 分级只进审计（后台有区分有记录）；用户界面不暴露 L1/L2 概念，确认弹窗只说"做什么、动哪些文件"
@@ -1939,23 +2066,49 @@ export class AgentHost {
     await this.buildHarness(piSession);
   }
 
-  async prompt(text: string, attachments?: Array<{ name: string; size?: number; dataBase64?: string }>): Promise<void> {
+  async prompt(text: string, attachments?: AttachmentInput[]): Promise<void> {
     if (!this.modelsRef) {
       throw new Error("模型未配置：单机模式请在「设置 → 模型」配置大模型 API");
     }
+    this.grantExternalPaths(text); // 提及即同意：用户消息里的外部路径登记会话级授权
     let full = text;
     let images: Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-    const valid = (attachments ?? []).filter((a): a is { name: string; size?: number; dataBase64: string } => !!a && !!a.name && typeof a.dataBase64 === "string" && a.dataBase64.length > 0);
-    if (valid.length) {
-      const saved = await saveAttachments(this.deps.workspace.root, valid, this.deps.audit);
-      full = text + attachmentBlock(saved);
-      // 多模态：图片附件直传模型（ImageContent）；同时仍落 .inbox 存档（agent 可用工具处理文件本身）
+    const atts = (attachments ?? []).filter((a): a is AttachmentInput => !!a && !!a.name && (!!a.path || (!!a.dataBase64 && a.dataBase64.length > 0)));
+    if (atts.length) {
+      // 输入引用解析：磁盘文件零副本引用；无路径字节落产品域暂存（哈希去重）
+      const ws = this.deps.workspace;
+      const { refs, errors } = await resolveInputReferences(ws.tempRoot, atts, this.deps.audit);
+      // 用户亲手给的输入 = 同意被读：工作区/暂存围栏内的天然可读，围栏外的登记会话级读授权
+      for (const r of refs) {
+        const abs = path.resolve(r);
+        if (!ws.isInWriteFence(abs) && !this.grantAllowsRead(abs)) {
+          this.externalGrants.set(abs, "read");
+          if (!this.grantedAudited.has(abs)) {
+            this.grantedAudited.add(abs);
+            this.deps.audit.append({ event: "external_read_grant", path: abs, kind: "read", source: "attachment" });
+          }
+        }
+      }
+      const errNote = errors.length ? `\n[注意]以下附件未能解析：${errors.join("；")}` : "";
+      full = text + attachmentBlock(refs) + errNote;
+      // 多模态：图片直传模型（ImageContent）——粘贴/字节附件直接用；磁盘图片附件读文件转 base64
       if (this.supportsVision()) {
         const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
-        const imgs = valid
-          .map((a, i) => ({ ext: String(a.name).split(".").pop()?.toLowerCase() ?? "", b64: a.dataBase64!, rel: saved[i] }))
-          .filter((x) => MIME[x.ext])
-          .map((x) => ({ type: "image" as const, data: x.b64, mimeType: MIME[x.ext] }));
+        const imgs: Array<{ type: "image"; data: string; mimeType: string }> = [];
+        for (const a of atts) {
+          const ext = String(a.name).split(".").pop()?.toLowerCase() ?? "";
+          if (!MIME[ext]) continue;
+          if (a.dataBase64) {
+            imgs.push({ type: "image", data: a.dataBase64, mimeType: MIME[ext] });
+          } else if (a.path) {
+            try {
+              const bytes = await fsp.readFile(path.resolve(String(a.path)));
+              imgs.push({ type: "image", data: bytes.toString("base64"), mimeType: MIME[ext] });
+            } catch {
+              /* 读失败交由模型用工具自行处理 */
+            }
+          }
+        }
         if (imgs.length) images = imgs;
       }
     }
@@ -2023,6 +2176,7 @@ export class AgentHost {
     this.detachHarnessNow();
     this.sessionId = null;
     this.sessionTitle = "";
+    this.clearGrants(); // 外部路径授权是会话级：新会话清零
     // 挂载（连接器/知识库）是会话级状态：新建即清空，不跨会话残留
     this.activeConnectors = new Set();
     this.activeKnowledge = new Set();
@@ -2055,6 +2209,7 @@ export class AgentHost {
     await this.teardownHarness();
     this.sessionId = id;
     this.sessionTitle = data.title ?? "";
+    this.clearGrants(); // 外部路径授权是会话级：切换会话清零
     const piSession = await this.deps.sessions.openSessionObject(id);
     if (piSession) await this.buildHarness(piSession);
     this.msgMirror = Array.isArray(data.messages) ? data.messages : [];

@@ -57,7 +57,7 @@ import { PersonalMcpStore } from "./personal-mcp";
 import { ImBridge, type ImHostLike } from "./im-bridge";
 import { checkClientUpdate } from "./update-checker";
 import { officeBuiltinVersion } from "./office-cli";
-import { attachmentBlock, safeAttachmentName, saveAttachments } from "./attachments";
+import { attachmentBlock, safeAttachmentName, resolveInputReferences, sweepWorkspacesTemp } from "./attachments";
 import { AppSettingsStore, type AppSettings, type ConfirmMode, normalizeConfirmMode } from "./app-settings";
 import type { UiEvent } from "../shared/protocol";
 
@@ -424,6 +424,8 @@ async function enterStandalone(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   workspace = Workspace.init();
+  // 产品域暂存清理（v6）：~/.ordo/workspaces/*/tmp/ 下超过 TTL（72h）的条目启动时清除；失败不阻断
+  void sweepWorkspacesTemp(workspace.dirs.home).catch((e) => console.warn("[TMP] 暂存清理失败:", e));
   // 内置 Office 引擎健康标记（e2e 探针断言）：officecli 定性内置，随安装包分发、随发版更新
   const officeVer = officeBuiltinVersion();
   console.log(officeVer ? `[OFFICE] builtin v${officeVer}` : "[OFFICE] builtin 二进制缺失（Office 工具/预览将不可用）");
@@ -1607,26 +1609,91 @@ else if(m.method==="tools/call")send({jsonrpc:"2.0",id:m.id,result:{content:[{ty
     })()`);
     check("插件包面板再点关闭", packsClosed === true);
 
-    // 9.6c 附件链路（composer 附件真实实现回归）：净化/去重落盘/相对路径/附件块拼接
+    // 9.6c 输入引用链路（v6 引用化回归）：磁盘文件零副本引用；字节落按工作区暂存（哈希去重）；附件块引用语义
     {
-      const attRoot = path.join(workspace!.dirs.home, "selftest-att");
+      const tempRoot = workspace!.tempRoot;
+      const diskFile = path.join(workspace!.dirs.home, "selftest-att", "外部引用.txt");
+      fs.mkdirSync(path.dirname(diskFile), { recursive: true });
+      fs.writeFileSync(diskFile, "hello-external");
       const b64 = Buffer.from("hello-attachment").toString("base64");
-      const rels = await saveAttachments(attRoot, [
+      const r1 = await resolveInputReferences(tempRoot, [
+        { name: "外部引用.txt", path: diskFile },
         { name: "测试 报告.docx", dataBase64: b64 },
-        { name: "测试 报告.docx", dataBase64: Buffer.from("second").toString("base64") },
+        { name: "测试 报告.docx", dataBase64: b64 }, // 同字节第二次：哈希同名，落盘去重
       ]);
+      const materialized = r1.refs.filter((r) => r.startsWith(tempRoot));
       check(
-        "附件落盘（净化+去重+相对路径）",
-        rels.length === 2 &&
-          rels[0] !== rels[1] &&
-          rels.every((r) => r.startsWith(".inbox/") && !r.includes("\\")) &&
-          fs.existsSync(path.join(attRoot, rels[0])) &&
-          fs.readFileSync(path.join(attRoot, rels[0]), "utf-8") === "hello-attachment",
-        JSON.stringify(rels)
+        "输入引用（磁盘零副本+字节哈希去重落暂存）",
+        r1.refs.length === 3 &&
+          r1.refs[0] === path.resolve(diskFile) &&
+          materialized.length === 2 &&
+          materialized[0] === materialized[1] &&
+          path.basename(materialized[0]).includes("-") &&
+          fs.readFileSync(materialized[0], "utf-8") === "hello-attachment",
+        JSON.stringify(r1.refs)
       );
-      check("附件块拼接", attachmentBlock(rels).includes("- " + rels[0]) && attachmentBlock([]) === "");
+      check("附件块引用语义", attachmentBlock(r1.refs).includes("- " + r1.refs[0]) && attachmentBlock([]) === "");
       check("附件名净化（防目录穿越）", safeAttachmentName("../../evil.txt") === "evil.txt" && safeAttachmentName("") === "attachment.bin");
-      fs.rmSync(attRoot, { recursive: true, force: true });
+      // 暂存可读、不可写围栏（v6 写围栏 = 工作区 + tempRoot）
+      check(
+        "围栏：暂存可读、外部未授权不可写",
+        (() => {
+          try {
+            workspace!.resolveReadable(materialized[0]);
+            workspace!.resolveReadable(diskFile); // 磁盘引用未授权 → 应抛错
+            return false;
+          } catch {
+            /* 磁盘引用未授权应抛错（上面第一个 resolveReadable 已通过） */
+          }
+          try {
+            workspace!.resolveInside(materialized[0]);
+            return true; // tempRoot 在写围栏内
+          } catch {
+            return false;
+          }
+        })()
+      );
+      fs.rmSync(path.dirname(diskFile), { recursive: true, force: true });
+    }
+
+    // 9.6d 提及即授权（v6）：外部路径提取/围栏判定/run_command 分级
+    {
+      const extFile = path.join(workspace!.dirs.home, "selftest-ext.txt");
+      fs.writeFileSync(extFile, "x");
+      const host2 = host as any;
+      host2.grantExternalPaths(`请分析 ${extFile} 的内容`);
+      check(
+        "提及即授权（外部文件登记读授权）",
+        host2.grantAllowsRead(extFile) && !host2.grantAllowsWriteUnder(extFile)
+      );
+      const outside = path.join(workspace!.dirs.home, "selftest-not-mentioned.txt");
+      fs.writeFileSync(outside, "x");
+      check(
+        "未提及的外部路径不可读",
+        (() => {
+          try {
+            host2.resolveReadableFor(outside);
+            return false;
+          } catch {
+            return true;
+          }
+        })()
+      );
+      const tools = host2.curTools as any[];
+      const rc = tools.find((t) => t.name === "run_command");
+      const isWin = process.platform === "win32";
+      check(
+        "run_command 分级：只读 L1、引用外部路径强制 L2",
+        rc.levelFor({ command: isWin ? "dir" : "ls" }) === "L1" &&
+          rc.levelFor({ command: `${isWin ? "get-content" : "cat"} ${outside}` }) === "L2"
+      );
+      const sub = path.join(workspace!.root, "selftest-sub");
+      fs.mkdirSync(sub, { recursive: true });
+      check("run_command cwd 子目录不升 L2", rc.levelFor({ command: isWin ? "dir" : "ls", cwd: sub }) === "L1");
+      fs.rmSync(extFile, { force: true });
+      fs.rmSync(outside, { force: true });
+      fs.rmSync(sub, { recursive: true, force: true });
+      host2.clearGrants();
     }
 
     // 9.6b 遗留包清理回归（officecli 内置定性）：伪造已装 officecli 包 → cleanupLegacy → 登记与 managed 目录齐清
@@ -2084,17 +2151,27 @@ else if(m.method==="tools/call")send({jsonrpc:"2.0",id:m.id,result:{content:[{ty
         const noDone = await Promise.race([pNo, new Promise<{ replies: string[] }>((res) => setTimeout(() => res({ replies: ["timeout"] }), 300_000))]);
         check("IM 拒绝后任务收尾", !noDone.replies.includes("timeout"), JSON.stringify(noDone.replies.slice(0, 2)));
 
-        // 媒体接收 → .inbox 附件链路；/get 回传（含越界拦截）
+        // 媒体接收 → 产品域暂存（v6 引用化：~/.ordo/workspaces/<id>/tmp/uploads/<日期>/<hash>-<名>）；/get 回传（含越界拦截）
         const rMedia = await imBridge!.deliverForTest("dingtalk", "user-abc-1", "请看看这份文件", { kind: "file", fileName: "im-media-test.txt", mediaKey: "k-x" });
         const day13 = new Date().toISOString().slice(0, 10);
-        const mediaFile = path.join(imRoot13, ".inbox", day13, "im-media-test.txt");
-        const mediaOk = fs.existsSync(mediaFile) && fs.readFileSync(mediaFile, "utf-8").includes("IM 媒体自测内容");
-        check("IM 媒体下载→附件落盘", mediaOk && rMedia.replies.some((t) => t.includes("收到文件")), JSON.stringify({ mediaOk, replies: rMedia.replies.slice(0, 2) }));
-        const rGet = await imBridge!.deliverForTest("dingtalk", "user-abc-1", `/get .inbox/${day13}/im-media-test.txt`);
+        const mediaDir = path.join(workspace!.dirs.home, "workspaces", "default", "tmp", "uploads", day13);
+        const mediaName = (() => {
+          try {
+            return fs.readdirSync(mediaDir).find((n) => n.endsWith("im-media-test.txt")) ?? "";
+          } catch {
+            return "";
+          }
+        })();
+        const mediaFile = path.join(mediaDir, mediaName);
+        const mediaOk = !!mediaName && fs.readFileSync(mediaFile, "utf-8").includes("IM 媒体自测内容");
+        check("IM 媒体下载→落产品域暂存（哈希去重）", mediaOk && rMedia.replies.some((t) => t.includes("收到文件")), JSON.stringify({ mediaOk, replies: rMedia.replies.slice(0, 2) }));
+        const wsDlFile = path.join(imRoot13, "im-dl-test.txt");
+        fs.writeFileSync(wsDlFile, "IM /get 自测内容");
+        const rGet = await imBridge!.deliverForTest("dingtalk", "user-abc-1", "/get im-dl-test.txt");
         check("IM /get 回传工作区文件", rGet.files.length === 1 && rGet.files[0].bytes > 0, JSON.stringify(rGet));
         const rEsc = await imBridge!.deliverForTest("dingtalk", "user-abc-1", "/get ../outside.txt");
         check("IM /get 越界拦截", rEsc.replies.some((t) => t.includes("路径越界")), JSON.stringify(rEsc));
-        await fsp.rm(mediaFile, { force: true }).catch(() => {});
+        await fsp.rm(wsDlFile, { force: true }).catch(() => {});
 
         const r5 = await imBridge!.deliverForTest("dingtalk", "user-abc-1", "/help");
         check("IM /help 用法", r5.replies.some((t) => t.includes("用法")), JSON.stringify(r5));
@@ -2232,16 +2309,21 @@ app.whenReady().then(async () => {
   win.loadFile(path.join(__dirname, "../../src/renderer/index.html"));
 
   ipcMain.handle("ordo:prompt", async (_e, text: unknown, attachments?: unknown) => {
-    // 附件限流：单文件 ≤ 25MB、总量 ≤ 60MB、个数 ≤ 10（超限直接拒绝，不静默丢弃）
+    // 输入限流：个数 ≤ 10；字节附件单文件 ≤ 25MB、总量 ≤ 60MB（路径引用不占额度——零副本，超限直接拒绝不静默丢弃）
     const atts = Array.isArray(attachments)
-      ? (attachments as Array<{ name?: unknown; size?: unknown; dataBase64?: unknown }>)
+      ? (attachments as Array<{ name?: unknown; size?: unknown; path?: unknown; dataBase64?: unknown }>)
           .filter((a) => a && typeof a === "object")
-          .map((a) => ({ name: String(a.name ?? ""), size: Number(a.size ?? 0), dataBase64: typeof a.dataBase64 === "string" ? a.dataBase64 : "" }))
+          .map((a) => ({
+            name: String(a.name ?? ""),
+            size: Number(a.size ?? 0),
+            path: typeof a.path === "string" && a.path.trim() ? a.path.trim() : undefined,
+            dataBase64: typeof a.dataBase64 === "string" ? a.dataBase64 : "",
+          }))
       : [];
     if (atts.length > 10) throw new Error("附件过多（一次最多 10 个）");
-    const b64Bytes = (a: { dataBase64: string }) => Math.floor(a.dataBase64.length * 0.75);
+    const b64Bytes = (a: { dataBase64?: string }) => Math.floor((a.dataBase64?.length ?? 0) * 0.75);
     for (const a of atts) {
-      if (b64Bytes(a) > 25 * 1024 * 1024) throw new Error(`附件「${a.name}」超过单文件 25MB 上限`);
+      if (!a.path && b64Bytes(a) > 25 * 1024 * 1024) throw new Error(`附件「${a.name}」超过单文件 25MB 上限`);
     }
     if (atts.reduce((s, a) => s + b64Bytes(a), 0) > 60 * 1024 * 1024) throw new Error("附件总大小超过 60MB 上限");
     await host!.prompt(String(text), atts.length ? atts : undefined);
@@ -2503,6 +2585,19 @@ app.whenReady().then(async () => {
     const abs = workspace!.resolveInside(String(p ?? ""));
     const err = await shell.openPath(abs); // 空串 = 成功；否则为系统错误描述
     return { ok: err === "" };
+  });
+  // 历史交付卡存在性批量检查（v6）：渲染层预取后过滤已消失文件（只回布尔，无路径外泄面）
+  ipcMain.handle("ordo:filesExist", (_e, paths: unknown) => {
+    const list = Array.isArray(paths) ? paths.map(String) : [];
+    const out: Record<string, boolean> = {};
+    for (const p of list) {
+      try {
+        out[p] = fs.existsSync(workspace!.resolveInside(p));
+      } catch {
+        out[p] = false; // 越界路径按不存在处理
+      }
+    }
+    return out;
   });
 
   ipcMain.handle("ordo:getWorkspaceFiles", () => {
